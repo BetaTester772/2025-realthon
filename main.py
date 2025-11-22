@@ -15,6 +15,7 @@ from typing import List, Optional
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(dotenv_path=ENV_PATH)
@@ -170,6 +171,8 @@ class HistogramPredictResponse(BaseModel):
     num_samples: int
     sample_scores: List[float]
     total_students: Optional[int] = None
+    my_score: Optional[float] = None
+    my_percentile: Optional[float] = None
 
 
 class ReviewAnalysisResponse(BaseModel):
@@ -198,12 +201,14 @@ class CumulativeHistogramResponse(BaseModel):
     cumulative_histogram: dict
     total_weight: int
     evaluation_items: List[dict]
+    my_cumulative_score: Optional[float] = None
+    my_percentile: Optional[float] = None
 
 
 app = FastAPI(
-    title="Smart Learning Strategy & Grade Toolkit API",
-    version="1.0.0",
-    description="SetTransformer 딥러닝 모델 기반 성적 분포 예측 및 OpenAI 기반 학습 전략 추천 시스템"
+        title="Smart Learning Strategy & Grade Toolkit API",
+        version="1.0.0",
+        description="SetTransformer 딥러닝 모델 기반 성적 분포 예측 및 OpenAI 기반 학습 전략 추천 시스템"
 )
 
 app.add_middleware(
@@ -385,12 +390,31 @@ def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
+    my_score = item.my_score if item else None
+    my_percentile = None
+
+    if my_score is not None:
+        cumulative_below = 0
+        for bin_range, count in histogram.items():
+            bin_start = int(bin_range.split('-')[0])
+            bin_end = int(bin_range.split('-')[1])
+
+            if my_score > bin_end:
+                cumulative_below += count
+            elif bin_start <= my_score <= bin_end:
+                cumulative_below += count * (my_score - bin_start) / (bin_end - bin_start)
+                break
+
+        my_percentile = (cumulative_below / total) * 100 if total > 0 else None
+
     return HistogramPredictResponse(
             evaluation_item_id=evaluation_item_id,
             histogram=histogram,
             num_samples=len(score_values),
             sample_scores=score_values,
-            total_students=total
+            total_students=total,
+            my_score=my_score,
+            my_percentile=my_percentile
     )
 
 
@@ -597,13 +621,18 @@ def get_semester_advice(
         raise HTTPException(status_code=500, detail=f"AI 분석 중 오류가 발생했습니다.")
 
 
-@app.get("/courses/{course_id}/cumulative-histogram", response_model=CumulativeHistogramResponse, tags=["ML Prediction"])
+@app.get("/courses/{course_id}/cumulative-histogram", response_model=CumulativeHistogramResponse,
+         tags=["ML Prediction"])
 def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
     """
     과목의 모든 평가 항목들의 히스토그램을 가중치에 따라 누적합니다.
     각 evaluation_item의 히스토그램에 weight를 곱한 뒤 모두 합산하여 최종 성적 분포를 예측합니다.
 
     예: 과제1(20%) + 과제2(20%) + 중간고사(30%) + 기말고사(30%)
+
+    사용자의 점수(my_score)가 있는 경우, 가중 평균으로 계산한 누적 점수(my_cumulative_score)와
+    히스토그램 내에서의 백분위(my_percentile)도 함께 반환합니다.
+    백분위는 0-100 범위의 값으로, 사용자보다 낮은 점수를 받은 학생들의 비율을 나타냅니다.
     """
     if ml_predictor is None:
         raise HTTPException(status_code=503, detail="ML model not loaded")
@@ -616,8 +645,8 @@ def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
     total_students = course.total_students if course and course.total_students else 99
 
     cumulative_histogram = {
-        "0-10": 0.0, "10-20": 0.0, "20-30": 0.0, "30-40": 0.0, "40-50": 0.0,
-        "50-60": 0.0, "60-70": 0.0, "70-80": 0.0, "80-90": 0.0, "90-100": 0.0
+            "0-10" : 0.0, "10-20": 0.0, "20-30": 0.0, "30-40": 0.0, "40-50": 0.0,
+            "50-60": 0.0, "60-70": 0.0, "70-80": 0.0, "80-90": 0.0, "90-100": 0.0
     }
 
     total_weight = sum(item.weight for item in items)
@@ -625,16 +654,16 @@ def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
 
     for item in items:
         scores = db.query(OtherStudentScoreModel).filter(
-            OtherStudentScoreModel.evaluation_item_id == item.id
+                OtherStudentScoreModel.evaluation_item_id == item.id
         ).all()
 
         if not scores:
             evaluation_items_info.append({
-                "id": item.id,
-                "name": item.name,
-                "weight": item.weight,
-                "histogram": None,
-                "note": "점수 데이터 없음"
+                    "id"       : item.id,
+                    "name"     : item.name,
+                    "weight"   : item.weight,
+                    "histogram": None,
+                    "note"     : "점수 데이터 없음"
             })
             continue
 
@@ -649,24 +678,54 @@ def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
                     cumulative_histogram[bin_range] += count * weight_ratio
 
             evaluation_items_info.append({
-                "id": item.id,
-                "name": item.name,
-                "weight": item.weight,
-                "histogram": histogram,
-                "num_samples": len(score_values)
+                    "id"         : item.id,
+                    "name"       : item.name,
+                    "weight"     : item.weight,
+                    "histogram"  : histogram,
+                    "num_samples": len(score_values)
             })
         except Exception as e:
             evaluation_items_info.append({
-                "id": item.id,
-                "name": item.name,
-                "weight": item.weight,
-                "histogram": None,
-                "error": str(e)
+                    "id"       : item.id,
+                    "name"     : item.name,
+                    "weight"   : item.weight,
+                    "histogram": None,
+                    "error"    : str(e)
             })
 
+    my_cumulative_score = None
+    my_percentile = None
+
+    if total_weight > 0:
+        cumulative_score_sum = 0
+        valid_items = 0
+
+        for item in items:
+            if item.my_score is not None:
+                cumulative_score_sum += item.my_score * (item.weight / 100.0)
+                valid_items += 1
+
+        if valid_items > 0:
+            my_cumulative_score = cumulative_score_sum
+
+            cumulative_below = 0
+            for bin_range, count in cumulative_histogram.items():
+                bin_start = int(bin_range.split('-')[0])
+                bin_end = int(bin_range.split('-')[1])
+
+                if my_cumulative_score > bin_end:
+                    cumulative_below += count
+                elif bin_start <= my_cumulative_score <= bin_end:
+                    cumulative_below += count * (my_cumulative_score - bin_start) / (bin_end - bin_start)
+                    break
+
+            my_percentile = (cumulative_below / total_students) * 100 if total_students > 0 else None
+
     return CumulativeHistogramResponse(
-        course_id=course_id,
-        cumulative_histogram=cumulative_histogram,
-        total_weight=total_weight,
-        evaluation_items=evaluation_items_info
+            course_id=course_id,
+            cumulative_histogram=cumulative_histogram,
+            total_weight=total_weight,
+            evaluation_items=evaluation_items_info,
+            my_cumulative_score=my_cumulative_score,
+            my_percentile=my_percentile
     )

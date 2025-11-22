@@ -101,9 +101,11 @@ API 문서는 `http://localhost:8000/docs`에서 확인할 수 있습니다.
 
 - `GET /predict-histogram` - 샘플 점수로부터 히스토그램 예측
     - Query Parameters: `evaluation_item_id`
+    - 반환: 10개 구간의 성적 분포 + 사용자 점수/백분위 (my_score가 있는 경우)
 
 - `GET /courses/{course_id}/cumulative-histogram` - 과목별 누적 히스토그램
     - 모든 평가 항목의 가중치를 고려한 누적 성적 분포
+    - 반환: 가중 평균 누적 히스토그램 + 사용자 누적 점수/백분위 (my_score가 있는 경우)
 
 ### Course Management
 
@@ -147,43 +149,43 @@ Output (히스토그램 확률 분포)
 #### 핵심 컴포넌트
 
 1. **MultiheadAttentionBlock**
-   - Multi-head Self-Attention with residual connections
-   - Layer Normalization
-   - Feed-Forward Network (dim → 4×dim → dim)
-   - Dropout regularization
+    - Multi-head Self-Attention with residual connections
+    - Layer Normalization
+    - Feed-Forward Network (dim → 4×dim → dim)
+    - Dropout regularization
 
 2. **SetTransformerEncoder**
-   - **Inducing Points (IP)**: 학습 가능한 latent representations (기본 16개)
-   - 집합의 순서에 불변한(permutation-invariant) 인코딩
-   - 두 단계 attention:
-     1. IP가 입력 집합 attend → H 생성
-     2. 입력 집합이 H attend → 인코딩된 표현
+    - **Inducing Points (IP)**: 학습 가능한 latent representations (기본 16개)
+    - 집합의 순서에 불변한(permutation-invariant) 인코딩
+    - 두 단계 attention:
+        1. IP가 입력 집합 attend → H 생성
+        2. 입력 집합이 H attend → 인코딩된 표현
 
 #### 하이퍼파라미터
 
-| 파라미터 | 기본값 | 설명 |
-|---------|--------|------|
-| `hidden_dim` | 64 | 임베딩 차원 |
-| `num_heads` | 4 | Attention head 수 |
-| `num_inducers` | 16 | Inducing Points 수 |
-| `dropout` | 0.1 | Dropout 비율 |
-| `num_bins` | 10 | 히스토그램 구간 수 |
+| 파라미터           | 기본값 | 설명                |
+|----------------|-----|-------------------|
+| `hidden_dim`   | 64  | 임베딩 차원            |
+| `num_heads`    | 4   | Attention head 수  |
+| `num_inducers` | 16  | Inducing Points 수 |
+| `dropout`      | 0.1 | Dropout 비율        |
+| `num_bins`     | 10  | 히스토그램 구간 수        |
 
 #### 입력/출력
 
 - **입력**: 가변 길이 점수 샘플 (0-100 범위, 정규화 후 0-1)
 - **출력**: 10개 구간의 확률 분포 (0-10, 10-20, ..., 90-100)
-  - 확률값 (0-1) 또는 학생 수 (total_students 파라미터 지정 시)
+    - 확률값 (0-1) 또는 학생 수 (total_students 파라미터 지정 시)
 
 #### 학습 데이터
 
 합성 데이터 생성 기반 학습:
 
 - **4가지 난이도 타입**:
-  - `easy`: 평균 75-90점, 표준편차 5-10
-  - `normal`: 평균 60-80점, 표준편차 8-15
-  - `hard`: 평균 40-65점, 표준편차 8-15
-  - `bimodal`: 이중 정규분포 (40-60점 그룹 + 70-90점 그룹)
+    - `easy`: 평균 75-90점, 표준편차 5-10
+    - `normal`: 평균 60-80점, 표준편차 8-15
+    - `hard`: 평균 40-65점, 표준편차 8-15
+    - `bimodal`: 이중 정규분포 (40-60점 그룹 + 70-90점 그룹)
 - 각 클래스당 30명 학생 기준
 
 ### 모델 평가 지표
@@ -191,16 +193,16 @@ Output (히스토그램 확률 분포)
 모델 성능은 다음 세 가지 지표로 측정됩니다:
 
 - **MSE** (Mean Squared Error)
-  - 예측 히스토그램과 실제 히스토그램의 평균 제곱 오차
-  - 낮을수록 정확한 예측
+    - 예측 히스토그램과 실제 히스토그램의 평균 제곱 오차
+    - 낮을수록 정확한 예측
 
 - **JS Divergence** (Jensen-Shannon Divergence)
-  - 두 확률 분포 간의 대칭적 거리 측정
-  - 0에 가까울수록 두 분포가 유사
+    - 두 확률 분포 간의 대칭적 거리 측정
+    - 0에 가까울수록 두 분포가 유사
 
 - **EMD** (Earth Mover's Distance = Wasserstein-1)
-  - 한 분포를 다른 분포로 변환하는데 필요한 최소 "작업량"
-  - 히스토그램의 형태적 유사성을 잘 포착
+    - 한 분포를 다른 분포로 변환하는데 필요한 최소 "작업량"
+    - 히스토그램의 형태적 유사성을 잘 포착
 
 ### 모델 사용
 
