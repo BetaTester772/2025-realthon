@@ -32,10 +32,11 @@ DB_PATH = os.path.join(BASE_DIR, "hackathon.db")
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+        SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 # ---------------------------------------------------------
 # 2. Database Models
@@ -45,11 +46,13 @@ class StudentProfileModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     preferences = Column(String)
 
+
 class OtherStudentScoreModel(Base):
     __tablename__ = "other_student_scores"
     id = Column(Integer, primary_key=True, index=True)
     evaluation_item_id = Column(Integer, index=True)
     score = Column(Float)
+
 
 class CourseModel(Base):
     __tablename__ = "courses"
@@ -57,6 +60,7 @@ class CourseModel(Base):
     name = Column(String)
     course_code = Column(String, index=True)
     total_students = Column(Integer, default=99)
+
 
 class EvaluationItemModel(Base):
     __tablename__ = "evaluation_items"
@@ -67,13 +71,16 @@ class EvaluationItemModel(Base):
     my_score = Column(Float, nullable=True)
     is_submitted = Column(Boolean, default=False)
 
+
 class CourseReviewModel(Base):
     __tablename__ = "course_reviews"
     id = Column(Integer, primary_key=True, index=True)
     course_id = Column(Integer, index=True)
     content = Column(String)
 
+
 Base.metadata.create_all(bind=engine)
+
 
 # ---------------------------------------------------------
 # 3. Pydantic Schemas
@@ -82,28 +89,40 @@ Base.metadata.create_all(bind=engine)
 
 class StudentProfileCreate(BaseModel):
     preferences: str
+
+
 class StudentProfileResponse(BaseModel):
     id: int
     preferences: str
+
     class Config:
         from_attributes = True
+
 
 class ScoreCreate(BaseModel):
     evaluation_item_id: int
     score: float
+
+
 class ScoreResponse(ScoreCreate):
     id: int
+
     class Config:
         from_attributes = True
+
 
 class CourseCreate(BaseModel):
     name: str
     course_code: str
     total_students: Optional[int] = 99
+
+
 class CourseResponse(CourseCreate):
     id: int
+
     class Config:
         from_attributes = True
+
 
 class EvaluationItemCreate(BaseModel):
     course_id: int
@@ -111,28 +130,39 @@ class EvaluationItemCreate(BaseModel):
     weight: int
     my_score: Optional[float] = None
     is_submitted: Optional[bool] = False
+
+
 class EvaluationItemResponse(EvaluationItemCreate):
     id: int
+
     class Config:
         from_attributes = True
+
 
 class CourseReviewCreate(BaseModel):
     course_id: int
     content: str
+
+
 class CourseReviewResponse(CourseReviewCreate):
     id: int
+
     class Config:
         from_attributes = True
+
 
 class HistogramPredictRequest(BaseModel):
     evaluation_item_id: int
     # total_students: Optional[int] = None
+
+
 class HistogramPredictResponse(BaseModel):
     evaluation_item_id: int
     histogram: dict
     num_samples: int
     sample_scores: List[float]
     total_students: Optional[int] = None
+
 
 # [AI Advice Single]
 class ReviewAnalysisResponse(BaseModel):
@@ -141,14 +171,17 @@ class ReviewAnalysisResponse(BaseModel):
     summary: str = Field(..., description="시험/과제 공통 언급 요약")
     advice: str = Field(..., description="목표 성적 달성 조언")
 
+
 # [AI Advice Whole Semester] (New)
 class SemesterPlanItem(BaseModel):
     course_index: int = Field(..., description="입력된 과목 순서 (1부터 시작)")
     effort_percent: int = Field(..., description="투자해야 할 노력 비율 (0~100)")
 
+
 class SemesterPlanResponse(BaseModel):
     courses: List[SemesterPlanItem]
     overall_advice: str = Field(..., description="전체 학기 운영을 위한 1-2문장 조언")
+
 
 # ---------------------------------------------------------
 # 4. FastAPI App & ML Setup
@@ -164,6 +197,8 @@ app.add_middleware(
 )
 
 ml_predictor = None
+
+
 @app.on_event("startup")
 async def startup_event():
     global ml_predictor
@@ -176,6 +211,7 @@ async def startup_event():
         print("⚠ ML module skipped.")
         ml_predictor = None
 
+
 def get_db():
     db = SessionLocal()
     try:
@@ -183,13 +219,17 @@ def get_db():
     finally:
         db.close()
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
 
+
 @app.get("/dummy-histo")
 async def get_dummy_histogram():
-    return {"0-10": 5, "10-20": 15, "20-30": 25, "30-40": 10, "40-50": 8, "50-60": 12, "60-70": 7, "70-80": 3, "80-90": 1, "90-100": 0}
+    return {"0-10" : 5, "10-20": 15, "20-30": 25, "30-40": 10, "40-50": 8, "50-60": 12, "60-70": 7, "70-80": 3,
+            "80-90": 1, "90-100": 0}
+
 
 # ---------------------------------------------------------
 # 5. Existing Endpoints
@@ -204,9 +244,11 @@ async def create_student_profile(profile: StudentProfileCreate, db: Session = De
     db.refresh(new_profile)
     return new_profile
 
+
 @app.get("/student-profile", response_model=List[StudentProfileResponse], tags=["Student Profile"])
 async def get_all_student_profiles(db: Session = Depends(get_db)):
     return db.query(StudentProfileModel).all()
+
 
 @app.post("/courses", response_model=CourseResponse, tags=["Courses"])
 async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
@@ -216,9 +258,11 @@ async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
     db.refresh(new_course)
     return new_course
 
+
 @app.get("/courses", response_model=List[CourseResponse], tags=["Courses"])
 async def get_all_courses(db: Session = Depends(get_db)):
     return db.query(CourseModel).all()
+
 
 @app.post("/evaluation-items", response_model=EvaluationItemResponse, tags=["Evaluation Items"])
 async def create_evaluation_item(item: EvaluationItemCreate, db: Session = Depends(get_db)):
@@ -228,9 +272,11 @@ async def create_evaluation_item(item: EvaluationItemCreate, db: Session = Depen
     db.refresh(new_item)
     return new_item
 
+
 @app.get("/evaluation-items", response_model=List[EvaluationItemResponse], tags=["Evaluation Items"])
 async def get_all_evaluation_items(db: Session = Depends(get_db)):
     return db.query(EvaluationItemModel).all()
+
 
 @app.post("/course-reviews", response_model=CourseReviewResponse, tags=["Course Reviews"])
 async def create_course_review(review: CourseReviewCreate, db: Session = Depends(get_db)):
@@ -240,9 +286,11 @@ async def create_course_review(review: CourseReviewCreate, db: Session = Depends
     db.refresh(new_review)
     return new_review
 
+
 @app.get("/course-reviews", response_model=List[CourseReviewResponse], tags=["Course Reviews"])
 async def get_all_course_reviews(db: Session = Depends(get_db)):
     return db.query(CourseReviewModel).all()
+
 
 @app.post("/other-student-scores", response_model=ScoreResponse, tags=["Other Student Scores"])
 async def create_other_score(score_data: ScoreCreate, db: Session = Depends(get_db)):
@@ -252,6 +300,7 @@ async def create_other_score(score_data: ScoreCreate, db: Session = Depends(get_
     db.refresh(new_score)
     return new_score
 
+
 @app.get("/other-student-scores", response_model=List[ScoreResponse], tags=["Other Student Scores"])
 async def get_other_scores(item_id: Optional[int] = None, db: Session = Depends(get_db)):
     query = db.query(OtherStudentScoreModel)
@@ -259,15 +308,17 @@ async def get_other_scores(item_id: Optional[int] = None, db: Session = Depends(
         query = query.filter(OtherStudentScoreModel.evaluation_item_id == item_id)
     return query.all()
 
+
 @app.post("/predict-histogram", response_model=HistogramPredictResponse, tags=["ML Prediction"])
 async def predict_histogram(request: HistogramPredictRequest, db: Session = Depends(get_db)):
     if ml_predictor is None:
         raise HTTPException(status_code=503, detail="ML model not loaded")
-    scores = db.query(OtherStudentScoreModel).filter(OtherStudentScoreModel.evaluation_item_id == request.evaluation_item_id).all()
+    scores = db.query(OtherStudentScoreModel).filter(
+            OtherStudentScoreModel.evaluation_item_id == request.evaluation_item_id).all()
     if not scores:
         raise HTTPException(status_code=404, detail="No scores found")
     score_values = [s.score for s in scores]
-    
+
     # total = request.total_students
     # if total is None:
     total = None
@@ -284,11 +335,11 @@ async def predict_histogram(request: HistogramPredictRequest, db: Session = Depe
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
     return HistogramPredictResponse(
-        evaluation_item_id=request.evaluation_item_id,
-        histogram=histogram,
-        num_samples=len(score_values),
-        sample_scores=score_values,
-        total_students=total
+            evaluation_item_id=request.evaluation_item_id,
+            histogram=histogram,
+            num_samples=len(score_values),
+            sample_scores=score_values,
+            total_students=total
     )
 
 @app.get("/courses/{course_id}/advice", response_model=ReviewAnalysisResponse, tags=["AI Advice"])
@@ -299,28 +350,86 @@ async def get_course_advice(course_id: int, objective_grade: str, db: Session = 
     if not reviews:
         raise HTTPException(status_code=404, detail="리뷰 데이터가 없습니다.")
     course_reviews_str = "\n".join([f"- {r.content}" for r in reviews])
-    
+
+    import json
+    import re
+
     try:
-        completion = openai_client.beta.chat.completions.parse(
-            model="gpt-5-mini", 
-            messages=[
-                {"role": "system", "content": "당신은 강의평 분석 전문가입니다."},
-                {"role": "user", "content": f"목표성적: {objective_grade}\n리뷰:\n{course_reviews_str}\n위 내용을 바탕으로 분석해주세요."}
-            ],
-            response_format=ReviewAnalysisResponse,
+        response = openai_client.responses.create(
+                model="gpt-5-mini",
+                input=f"""
+            목표성적: {objective_grade}
+            이건 이전 수강자들의 강의평 입니다. 각 강의평은 과목 ID와 함께 주어집니다.
+            강의평에서 과제의 난이도와 관련한 정보를 추출해서 난이도를 정수형으로 추출해서 반환해주세요.
+            강의평에서 시험의 난이도와 관련한 정보를 추출해서 난이도를 정수형으로 추출해서 반환해주세요.
+            난이도는 1부터 5까지의 정수로 추출해주세요.
+            1: 매우 쉬움
+            2: 쉬움
+            3: 보통
+            4: 어려움
+            5: 매우 어려움
+            시험과 과제와 관련해 공통된 언급들은 정리해서 1-2문장으로 정리해주세요.
+            정리한 내용을 바탕으로 각 과제와 시험 중 어느 곳에 집중해야 할지 1-2문장으로 정리해서 조언형식으로 반환해주세요.
+            이 때 조언에는 과제와 시험 난이도 특성을 근거로 각 과제와 시험 중 어느 곳에 집중해야 할지 정리해주세요.
+            조언에는 목표성적에 따라 각 과제와 시험 중 어느 곳에 집중해야 할지 정리해주세요.
+            만약 하지 않아도 되는 과제가 있다면 그 과제는 하지 않아도 된다고 정리해주세요.
+            만약 그런 과제가 없다면 이 부분은 언급하지 말아주세요.
+            각 과제의 성적 비중이 어느 정도인지에 따라 각 과제와 시험 중 어느 곳에 집중해야 할지 정리해주세요.
+            비중이 크고 작은 것을 판단할 때에는 강의평에 언급된 경우에 대한 내용을 참고해주세요.
+            
+            강의평:
+            {course_reviews_str}
+            """,
+                text={
+                    "verbosity": "low",
+                    "format": {
+                        "type": "json_schema",
+                        "name": "course_advice",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "assignment_difficulty": {"type": "integer"},
+                                "exam_difficulty": {"type": "integer"},
+                                "summary": {"type": "string"},
+                                "advice": {"type": "string"}
+                            },
+                            "required": ["assignment_difficulty", "exam_difficulty", "summary", "advice"],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                reasoning={"effort": "low"},
         )
-        return completion.choices[0].message.parsed
+
+        text = response.output_text.strip()
+
+        # Try to extract JSON from markdown code blocks if present
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        # Try to find JSON object in the text
+        if not text.startswith('{'):
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                text = json_match.group(0)
+
+        result = json.loads(text)
+        return ReviewAnalysisResponse(**result)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON Parse Error: {str(e)} - Response: {response.output_text[:200]}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI Error: {str(e)}")
+
 
 # ---------------------------------------------------------
 # 6. [New] Whole Semester Strategy Endpoint
 # ---------------------------------------------------------
 @app.get("/semester-advice", response_model=SemesterPlanResponse, tags=["AI Advice"])
 async def get_semester_advice(
-    course_ids: List[int] = Query(..., description="수강할 과목 ID 리스트 (예: 1, 2, 3)"),
-    target_grades: List[str] = Query(..., description="각 과목의 목표 성적 (예: A+, A, B+)"),
-    db: Session = Depends(get_db)
+        course_ids: List[int] = Query(..., description="수강할 과목 ID 리스트 (예: 1, 2, 3)"),
+        target_grades: List[str] = Query(..., description="각 과목의 목표 성적 (예: A+, A, B+)"),
+        db: Session = Depends(get_db)
 ):
     """
     여러 과목의 리뷰를 종합하여 전체 학기 공부 비중(%)과 전략을 짜줍니다.
@@ -335,48 +444,97 @@ async def get_semester_advice(
 
     # 1. 각 과목의 리뷰 데이터 수집
     combined_reviews_text = ""
-    
+
     for idx, (cid, grade) in enumerate(zip(course_ids, target_grades)):
         course = db.query(CourseModel).filter(CourseModel.id == cid).first()
         if not course:
-            continue # 없는 강의는 패스하거나 에러 처리
-            
+            continue  # 없는 강의는 패스하거나 에러 처리
+
         reviews = db.query(CourseReviewModel).filter(CourseReviewModel.course_id == cid).all()
         review_texts = "\n".join([f"- {r.content}" for r in reviews]) if reviews else "리뷰 없음"
-        
-        combined_reviews_text += f"\n[과목 {idx+1}: {course.name} (목표: {grade})]\n{review_texts}\n"
+
+        combined_reviews_text += f"\n[과목 {idx + 1}: {course.name} (목표: {grade})]\n{review_texts}\n"
 
     if not combined_reviews_text:
         raise HTTPException(status_code=404, detail="선택한 과목들에 대한 리뷰 데이터가 없습니다.")
 
     # 2. OpenAI 프롬프트 호출
-    try:
-        completion = openai_client.beta.chat.completions.parse(
-            model="gpt-5-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "당신은 대학생의 전체 학기 학습 계획을 설계하는 전략가입니다."
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-                    다음은 이번 학기 수강할 과목들의 리뷰와 목표 성적입니다.
-                    
-                    {combined_reviews_text}
-                    
-                    위 내용을 바탕으로 다음을 JSON으로 분석해주세요:
-                    1. 각 과목별 투자해야 할 노력 비율(effort_percent, 총합 100이 되도록).
-                       - 과목 순서(course_index)는 1, 2, 3... 순으로 매칭할 것.
-                    2. 전체 학기에 대한 1~2문장의 핵심 조언(overall_advice).
-                    """
-                }
-            ],
-            response_format=SemesterPlanResponse,
-        )
-        
-        return completion.choices[0].message.parsed
+    import json
+    import re
 
+    try:
+        response = openai_client.responses.create(
+                model="gpt-5-mini",
+                input=f"""
+            너는 학습 계획을 설계하는 조교이다.
+
+            반드시 아래 JSON Schema를 만족하는 JSON 한 개만 출력해야 한다.
+            - JSON 이외의 텍스트(설명, 마크다운 등)는 절대 출력하지 마라.
+
+            과목 3개에 대한 리뷰가 주어지며,
+            선택한 과목들의 목표 성적은 순서대로: {", ".join(target_grades)}
+            (하지만 목표 성적은 JSON 출력 형식에는 포함하지 않는다.)
+
+            아래 규칙에 따라 JSON을 생성하라.
+
+            [규칙]
+            1) 각 과목에 대해 effort_percent(0~100 정수)를 정하라.
+            2) effort_percent들의 합은 반드시 100이 되어야 한다.
+            3) courses 배열의 course_index는 1, 2, 3 중 하나로 고정한다.
+            4) 전체 학기에 대한 조언(overall_advice)은 1~2문장으로만 작성한다.
+
+            --------- 수강평 시작 ---------
+            {combined_reviews_text}
+            --------- 수강평 끝 ---------
+            """,
+                text={
+                    "verbosity": "low",
+                    "format": {
+                        "type": "json_schema",
+                        "name": "semester_plan",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "courses": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "course_index": {"type": "integer"},
+                                            "effort_percent": {"type": "integer"}
+                                        },
+                                        "required": ["course_index", "effort_percent"],
+                                        "additionalProperties": False
+                                    }
+                                },
+                                "overall_advice": {"type": "string"}
+                            },
+                            "required": ["courses", "overall_advice"],
+                            "additionalProperties": False
+                        }
+                    }
+                },
+                reasoning={"effort": "low"},
+        )
+
+        text = response.output_text.strip()
+
+        # Try to extract JSON from markdown code blocks if present
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
+
+        # Try to find JSON object in the text
+        if not text.startswith('{'):
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                text = json_match.group(0)
+
+        result = json.loads(text)
+        return SemesterPlanResponse(**result)
+
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON Parse Error: {str(e)} - Response: {response.output_text[:200]}")
     except Exception as e:
         print(f"OpenAI Error: {str(e)}")
-        raise HTTPException(status_code=500, detail="AI 분석 중 오류가 발생했습니다.")
+        raise HTTPException(status_code=500, detail=f"AI 분석 중 오류가 발생했습니다.")
