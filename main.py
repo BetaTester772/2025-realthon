@@ -183,6 +183,13 @@ class SemesterPlanResponse(BaseModel):
     overall_advice: str = Field(..., description="전체 학기 운영을 위한 1-2문장 조언")
 
 
+class CumulativeHistogramResponse(BaseModel):
+    course_id: int
+    cumulative_histogram: dict
+    total_weight: int
+    evaluation_items: List[dict]
+
+
 # ---------------------------------------------------------
 # 4. FastAPI App & ML Setup
 # ---------------------------------------------------------
@@ -309,12 +316,12 @@ async def get_other_scores(item_id: Optional[int] = None, db: Session = Depends(
     return query.all()
 
 
-@app.post("/predict-histogram", response_model=HistogramPredictResponse, tags=["ML Prediction"])
-def predict_histogram(request: HistogramPredictRequest, db: Session = Depends(get_db)):
+@app.get("/predict-histogram", response_model=HistogramPredictResponse, tags=["ML Prediction"])
+def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
     if ml_predictor is None:
         raise HTTPException(status_code=503, detail="ML model not loaded")
     scores = db.query(OtherStudentScoreModel).filter(
-            OtherStudentScoreModel.evaluation_item_id == request.evaluation_item_id).all()
+            OtherStudentScoreModel.evaluation_item_id == evaluation_item_id).all()
     if not scores:
         raise HTTPException(status_code=404, detail="No scores found")
     score_values = [s.score for s in scores]
@@ -322,7 +329,7 @@ def predict_histogram(request: HistogramPredictRequest, db: Session = Depends(ge
     # total = request.total_students
     # if total is None:
     total = None
-    item = db.query(EvaluationItemModel).filter(EvaluationItemModel.id == request.evaluation_item_id).first()
+    item = db.query(EvaluationItemModel).filter(EvaluationItemModel.id == evaluation_item_id).first()
     if item:
         course = db.query(CourseModel).filter(CourseModel.id == item.course_id).first()
         if course and course.total_students:
@@ -335,7 +342,7 @@ def predict_histogram(request: HistogramPredictRequest, db: Session = Depends(ge
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
     return HistogramPredictResponse(
-            evaluation_item_id=request.evaluation_item_id,
+            evaluation_item_id=evaluation_item_id,
             histogram=histogram,
             num_samples=len(score_values),
             sample_scores=score_values,
@@ -543,3 +550,91 @@ def get_semester_advice(
     except Exception as e:
         print(f"OpenAI Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"AI 분석 중 오류가 발생했습니다.")
+
+
+# ---------------------------------------------------------
+# 7. Cumulative Histogram Endpoint
+# ---------------------------------------------------------
+@app.get("/courses/{course_id}/cumulative-histogram", response_model=CumulativeHistogramResponse, tags=["ML Prediction"])
+def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
+    """
+    과목의 모든 평가 항목들의 히스토그램을 가중치(weight)에 따라 누적합니다.
+    - 각 evaluation_item의 히스토그램에 weight를 곱한 뒤 모두 합산
+    - 예: 과제1(20%) + 과제2(20%) + 중간고사(30%) + ...
+    """
+    if ml_predictor is None:
+        raise HTTPException(status_code=503, detail="ML model not loaded")
+
+    # 1. 해당 과목의 모든 평가 항목 가져오기
+    items = db.query(EvaluationItemModel).filter(EvaluationItemModel.course_id == course_id).all()
+    if not items:
+        raise HTTPException(status_code=404, detail="해당 과목의 평가 항목이 없습니다.")
+
+    # 2. total_students 가져오기
+    course = db.query(CourseModel).filter(CourseModel.id == course_id).first()
+    total_students = course.total_students if course and course.total_students else 99
+
+    # 3. 누적 히스토그램 초기화 (0-10, 10-20, ..., 90-100)
+    cumulative_histogram = {
+        "0-10": 0.0, "10-20": 0.0, "20-30": 0.0, "30-40": 0.0, "40-50": 0.0,
+        "50-60": 0.0, "60-70": 0.0, "70-80": 0.0, "80-90": 0.0, "90-100": 0.0
+    }
+
+    total_weight = sum(item.weight for item in items)
+    evaluation_items_info = []
+
+    # 4. 각 평가 항목의 히스토그램을 가중치만큼 곱해서 누적
+    for item in items:
+        # 해당 evaluation_item_id의 학생 점수들 가져오기
+        scores = db.query(OtherStudentScoreModel).filter(
+            OtherStudentScoreModel.evaluation_item_id == item.id
+        ).all()
+
+        if not scores:
+            # 점수가 없으면 스킵
+            evaluation_items_info.append({
+                "id": item.id,
+                "name": item.name,
+                "weight": item.weight,
+                "histogram": None,
+                "note": "점수 데이터 없음"
+            })
+            continue
+
+        score_values = [s.score for s in scores]
+
+        try:
+            # ML 모델로 히스토그램 예측
+            histogram = ml_predictor.predict(score_values, total_students=total_students)
+
+            # 히스토그램의 각 구간에 weight를 곱해서 누적
+            weight_ratio = item.weight / 100.0  # weight는 퍼센트이므로 100으로 나눔
+            for bin_range, count in histogram.items():
+                if bin_range in cumulative_histogram:
+                    cumulative_histogram[bin_range] += count * weight_ratio
+
+            evaluation_items_info.append({
+                "id": item.id,
+                "name": item.name,
+                "weight": item.weight,
+                "histogram": histogram,
+                "num_samples": len(score_values)
+            })
+        except Exception as e:
+            evaluation_items_info.append({
+                "id": item.id,
+                "name": item.name,
+                "weight": item.weight,
+                "histogram": None,
+                "error": str(e)
+            })
+
+    # 5. 누적 히스토그램 정규화 (선택사항: 합이 total_students가 되도록)
+    # 현재는 가중 평균으로 계산되므로 그대로 반환
+
+    return CumulativeHistogramResponse(
+        course_id=course_id,
+        cumulative_histogram=cumulative_histogram,
+        total_weight=total_weight,
+        evaluation_items=evaluation_items_info
+    )
