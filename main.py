@@ -176,6 +176,7 @@ class HistogramPredictResponse(BaseModel):
     total_students: Optional[int] = None
     my_score: Optional[float] = None
     my_percentile: Optional[float] = None
+    statistics: Optional[dict] = None
 
 
 class ReviewAnalysisResponse(BaseModel):
@@ -206,6 +207,7 @@ class CumulativeHistogramResponse(BaseModel):
     evaluation_items: List[dict]
     my_cumulative_score: Optional[float] = None
     my_percentile: Optional[float] = None
+    statistics: Optional[dict] = None
 
 
 # ---------------------------------------------------------
@@ -245,6 +247,66 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def calculate_histogram_statistics(histogram: dict) -> dict:
+    """
+    히스토그램으로부터 통계 정보를 계산합니다.
+
+    Args:
+        histogram: 히스토그램 딕셔너리 (예: {"0-10": 5, "10-20": 10, ...})
+
+    Returns:
+        통계 정보 딕셔너리:
+        - high: 최고 점수 구간의 중간값
+        - low: 최저 점수 구간의 중간값
+        - median: 중앙값
+        - mean: 평균값
+        - top_10_percent: 상위 10% 점수
+        - bottom_10_percent: 하위 10% 점수
+    """
+    # 히스토그램을 점수 리스트로 변환
+    scores = []
+    for bin_range, count in histogram.items():
+        bin_start = int(bin_range.split('-')[0])
+        bin_end = int(bin_range.split('-')[1])
+        bin_mid = (bin_start + bin_end) / 2
+        scores.extend([bin_mid] * int(count))
+
+    if not scores:
+        return None
+
+    scores.sort()
+    n = len(scores)
+
+    # 평균
+    mean = sum(scores) / n
+
+    # 중앙값
+    if n % 2 == 0:
+        median = (scores[n // 2 - 1] + scores[n // 2]) / 2
+    else:
+        median = scores[n // 2]
+
+    # 최고/최저
+    high = scores[-1]
+    low = scores[0]
+
+    # 상위 10%와 하위 10%
+    top_10_idx = max(0, int(n * 0.9))
+    bottom_10_idx = min(n - 1, int(n * 0.1))
+
+    top_10_percent = scores[top_10_idx]
+    bottom_10_percent = scores[bottom_10_idx]
+
+    return {
+        "high": high,
+        "low": low,
+        "median": median,
+        "mean": round(mean, 2),
+        "top_10_percent": top_10_percent,
+        "bottom_10_percent": bottom_10_percent
+    }
 
 
 @app.get("/health", tags=["System"])
@@ -409,6 +471,8 @@ def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
 
         my_percentile = (cumulative_below / total) * 100 if total > 0 else None
 
+    statistics = calculate_histogram_statistics(histogram)
+
     return HistogramPredictResponse(
             evaluation_item_id=evaluation_item_id,
             histogram=histogram,
@@ -416,7 +480,8 @@ def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
             sample_scores=score_values,
             total_students=total,
             my_score=my_score,
-            my_percentile=my_percentile
+            my_percentile=my_percentile,
+            statistics=statistics
     )
 
 
@@ -723,11 +788,14 @@ def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
 
             my_percentile = (cumulative_below / total_students) * 100 if total_students > 0 else None
 
+    statistics = calculate_histogram_statistics(cumulative_histogram)
+
     return CumulativeHistogramResponse(
             course_id=course_id,
             cumulative_histogram=cumulative_histogram,
             total_weight=total_weight,
             evaluation_items=evaluation_items_info,
             my_cumulative_score=my_cumulative_score,
-            my_percentile=my_percentile
+            my_percentile=my_percentile,
+            statistics=statistics
     )
