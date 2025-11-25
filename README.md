@@ -152,59 +152,170 @@ API 문서는 `http://localhost:8000/docs`에서 확인할 수 있습니다.
 
 ## API 엔드포인트
 
+자세한 API 명세는 서버 실행 후 `/docs` 엔드포인트에서 Swagger UI를 통해 확인할 수 있습니다.
+
+### System
+
+- `GET /health` - 서버 상태 확인
+    - 반환: `{"status": "healthy"}`
+
+- `GET /dummy-histo` - 테스트용 더미 히스토그램 데이터
+    - 개발/디버깅 용도의 샘플 히스토그램 반환
+
 ### ML Prediction
 
-- `GET /predict-histogram` - 샘플 점수로부터 히스토그램 예측
-    - Query Parameters: `evaluation_item_id`
-    - 반환: 10개 구간의 성적 분포 + 사용자 점수/백분위 (my_score가 있는 경우)
+- `GET /predict-histogram` - 평가 항목별 성적 분포 예측
+    - Query Parameters: `evaluation_item_id` (필수)
+    - 기능: SetTransformer 모델을 사용하여 샘플 점수로부터 전체 학급의 성적 분포를 예측
+    - 반환:
+        - `histogram`: 10개 구간(0-10, 10-20, ..., 90-100)의 성적 분포
+        - `num_samples`: 예측에 사용된 샘플 수
+        - `sample_scores`: 사용된 샘플 점수 리스트
+        - `total_students`: 전체 학생 수
+        - `my_score`: 사용자의 점수 (있는 경우)
+        - `my_percentile`: 사용자의 백분위 (my_score가 있는 경우)
+        - `statistics`: 히스토그램 통계 정보 (평균, 중앙값, 최고/최저, 상위/하위 10%)
 
-- `GET /courses/{course_id}/cumulative-histogram` - 과목별 누적 히스토그램
-    - 모든 평가 항목의 가중치를 고려한 누적 성적 분포
-    - 반환: 가중 평균 누적 히스토그램 + 사용자 누적 점수/백분위 (my_score가 있는 경우)
-
-### Course Management
-
-- `GET /courses` - 전체 과목 목록 조회
-- `POST /courses` - 새 과목 생성
-- `GET /courses/{course_id}` - 특정 과목 조회
-- `PUT /courses/{course_id}` - 과목 정보 수정
-- `DELETE /courses/{course_id}` - 과목 삭제
-
-### Evaluation Items
-
-- `GET /evaluation-items` - 평가 항목 목록 조회
-- `POST /evaluation-items` - 새 평가 항목 생성
-- `GET /courses/{course_id}/evaluation-items` - 과목별 평가 항목 조회
+- `GET /courses/{course_id}/cumulative-histogram` - 과목별 누적 성적 분포
+    - Path Parameters: `course_id` (필수)
+    - 기능: 과목의 모든 평가 항목(과제, 시험 등)을 가중치에 따라 합산하여 최종 성적 분포 예측
+    - 반환:
+        - `cumulative_histogram`: 가중 평균 누적 히스토그램
+        - `total_weight`: 전체 가중치 합계
+        - `evaluation_items`: 각 평가 항목별 히스토그램과 가중치 정보
+        - `my_cumulative_score`: 사용자의 가중 평균 점수 (my_score가 있는 경우)
+        - `my_percentile`: 사용자의 백분위 (my_cumulative_score가 있는 경우)
+        - `statistics`: 누적 히스토그램 통계 정보
 
 ### Student Profile
 
 - `GET /student-profile` - 학생 프로필 조회
-- `PUT /student-profile` - 학생 프로필 업데이트
+    - 반환: ID 1번 학생의 프로필 정보 (preferences)
 
-### AI Advice (OpenAI API 통합)
+- `PUT /student-profile` - 학생 프로필 업데이트
+    - Request Body: `{"preferences": "학생 선호도 및 특성"}`
+    - 기능: ID 1번 학생의 프로필 정보를 업데이트 (없으면 생성)
+    - 반환: 업데이트된 프로필 정보
+
+### Course Management
+
+- `GET /courses` - 전체 과목 목록 조회
+    - 반환: 모든 과목 정보 리스트
+
+- `POST /courses` - 새 과목 생성
+    - Request Body:
+        ```json
+        {
+          "name": "과목명",
+          "course_code": "과목 코드",
+          "total_students": 99  // 선택사항, 기본값 99
+        }
+        ```
+    - 반환: 생성된 과목 정보
+
+### Evaluation Items
+
+- `GET /evaluation-items` - 전체 평가 항목 목록 조회
+    - 반환: 모든 평가 항목 정보 리스트
+
+- `POST /evaluation-items` - 새 평가 항목 생성
+    - Request Body:
+        ```json
+        {
+          "course_id": 1,
+          "name": "평가 항목명",
+          "weight": 30,  // 가중치 (%)
+          "my_score": 85.5,  // 선택사항
+          "is_submitted": false  // 선택사항, 기본값 false
+        }
+        ```
+    - 반환: 생성된 평가 항목 정보
+
+### Course Reviews
+
+- `GET /course-reviews` - 전체 과목 수강평 목록 조회
+    - 반환: 모든 수강평 리스트
+
+- `POST /course-reviews` - 새 수강평 생성
+    - Request Body:
+        ```json
+        {
+          "course_id": 1,
+          "content": "수강평 내용"
+        }
+        ```
+    - 반환: 생성된 수강평 정보
+    - **참고**: 새 수강평 추가 시 해당 과목의 모든 AI 조언 캐시가 자동으로 무효화됩니다.
+
+### Other Student Scores
+
+- `GET /other-student-scores` - 다른 학생들의 점수 조회
+    - Query Parameters: `item_id` (선택사항, 평가 항목 ID로 필터링)
+    - 반환: 학생 점수 데이터 리스트
+
+- `POST /other-student-scores` - 새 학생 점수 데이터 생성
+    - Request Body:
+        ```json
+        {
+          "evaluation_item_id": 1,
+          "score": 82.5
+        }
+        ```
+    - 반환: 생성된 점수 데이터
+
+### AI Advice (OpenAI API)
+
+AI 조언 기능은 OpenAI API를 사용하며, Redis 캐싱을 통해 동일한 요청에 대한 응답 속도를 향상시킵니다.
 
 - `GET /courses/{course_id}/advice` - 과목별 학습 조언
-    - Query Parameters: `objective_grade` (목표 성적, 예: "A+", "B0")
-    - 반환: 과제/시험 난이도 분석 + 목표 성적 달성 전략
-    - Redis 캐시 사용 (동일한 course_id + objective_grade 조합에 대해 캐시)
+    - Path Parameters: `course_id` (필수)
+    - Query Parameters: `objective_grade` (필수, 목표 성적 예: "A+", "A0", "B+")
+    - 기능:
+        - 과목의 수강평을 분석하여 과제 및 시험 난이도 평가
+        - 목표 성적 달성을 위한 학습 전략 제공
+        - 학생 프로필의 선호도 정보를 고려한 맞춤형 조언
+    - 반환:
+        ```json
+        {
+          "assignment_difficulty": 4,  // 1-5 척도
+          "exam_difficulty": 3,  // 1-5 척도
+          "summary": "시험/과제 공통 언급 요약",
+          "advice": "목표 성적 달성 전략 조언"
+        }
+        ```
+    - 캐시: `course_id` + `objective_grade` 조합으로 캐싱 (TTL: 1시간)
 
 - `GET /semester-advice` - 학기 전체 학습 계획
-    - Query Parameters: `course_ids[]`, `target_grades[]`
-    - 반환: 각 과목별 노력 배분 비율(%) + 전체 학기 조언
-    - Redis 캐시 사용
+    - Query Parameters:
+        - `course_ids`: 수강할 과목 ID 리스트 (예: `?course_ids=1&course_ids=2&course_ids=3`)
+        - `target_grades`: 각 과목의 목표 성적 리스트 (예: `?target_grades=A+&target_grades=B0&target_grades=A0`)
+    - 기능:
+        - 여러 과목의 수강평을 종합 분석
+        - 각 과목별 노력 배분 비율(%) 계산
+        - 전체 학기 학습 전략 제공
+        - 학생 프로필의 선호도 정보를 고려한 맞춤형 계획
+    - 반환:
+        ```json
+        {
+          "courses": [
+            {"course_index": 1, "effort_percent": 35},
+            {"course_index": 2, "effort_percent": 40},
+            {"course_index": 3, "effort_percent": 25}
+          ],
+          "overall_advice": "전체 학기 운영 조언"
+        }
+        ```
+    - 캐시: `course_ids` + `target_grades` 조합으로 캐싱 (TTL: 1시간)
 
 ### Cache Management
 
 - `DELETE /cache/clear` - Redis 캐시 무효화
-    - Query Parameters: `pattern` (기본값: "*", 모든 캐시)
+    - Query Parameters: `pattern` (선택사항, 기본값: "*")
     - 예시:
-        - `?pattern=*` - 모든 캐시 삭제
-        - `?pattern=course_advice:*` - 과목 조언 캐시만 삭제
-        - `?pattern=semester_advice:*` - 학기 조언 캐시만 삭제
-
-**주의**: 새로운 수강평이 추가되면 해당 과목의 모든 캐시가 자동으로 무효화됩니다.
-
-자세한 API 명세는 `/docs` 엔드포인트에서 확인하세요.
+        - `/cache/clear` - 모든 캐시 삭제
+        - `/cache/clear?pattern=course_advice:*` - 과목 조언 캐시만 삭제
+        - `/cache/clear?pattern=semester_advice:*` - 학기 조언 캐시만 삭제
+    - 반환: `{"message": "Cache cleared for pattern: ..."}`
 
 ## ML 모델 아키텍처
 

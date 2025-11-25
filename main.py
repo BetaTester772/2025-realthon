@@ -19,9 +19,9 @@ import redis
 import json
 import hashlib
 
-# ---------------------------------------------------------
-# 0. Environment & OpenAI Setup
-# ---------------------------------------------------------
+# =============================================================================
+# 환경 설정 및 외부 서비스 초기화
+# =============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_PATH = os.path.join(BASE_DIR, ".env")
 load_dotenv(dotenv_path=ENV_PATH)
@@ -35,9 +35,10 @@ if OPENAI_API_KEY:
 else:
     print("⚠ Warning: OPENAI_API_KEY not found.")
 
-# ---------------------------------------------------------
-# Redis Cache Setup
-# ---------------------------------------------------------
+# =============================================================================
+# Redis 캐시 설정
+# OpenAI API 응답을 캐싱하여 성능 향상
+# =============================================================================
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
@@ -59,6 +60,10 @@ except (redis.ConnectionError, redis.TimeoutError) as e:
     print(f"⚠ Warning: Redis connection failed ({e}). Cache disabled.")
     redis_client = None
 
+# =============================================================================
+# 데이터베이스 설정
+# SQLite 데이터베이스 및 SQLAlchemy ORM 설정
+# =============================================================================
 DB_PATH = os.path.join(BASE_DIR, "hackathon.db")
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
@@ -68,6 +73,10 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+
+# =============================================================================
+# 데이터베이스 모델 (ORM)
+# =============================================================================
 
 class StudentProfileModel(Base):
     """학생 프로필 정보 저장 모델."""
@@ -114,6 +123,10 @@ class CourseReviewModel(Base):
 
 Base.metadata.create_all(bind=engine)
 
+
+# =============================================================================
+# Pydantic 스키마 (요청/응답 모델)
+# =============================================================================
 
 class StudentProfileCreate(BaseModel):
     """학생 프로필 생성 요청 스키마."""
@@ -237,10 +250,14 @@ class CumulativeHistogramResponse(BaseModel):
     statistics: Optional[dict] = None
 
 
-# ---------------------------------------------------------
-# 4. FastAPI App & ML Setup
-# ---------------------------------------------------------
-app = FastAPI(title="Hackathon API", version="1.0.0")
+# =============================================================================
+# FastAPI 애플리케이션 설정
+# =============================================================================
+app = FastAPI(
+        title="Smart Learning Strategy & Grade Toolkit API",
+        version="1.0.0",
+        description="SetTransformer 기반 성적 분포 예측 및 AI 학습 조언 시스템"
+)
 
 app.add_middleware(
         CORSMiddleware,
@@ -336,9 +353,10 @@ def calculate_histogram_statistics(histogram: dict) -> dict:
     }
 
 
-# ---------------------------------------------------------
-# Cache Utility Functions
-# ---------------------------------------------------------
+# =============================================================================
+# 유틸리티 함수
+# =============================================================================
+
 def generate_cache_key(prefix: str, *args, **kwargs) -> str:
     """
     캐시 키를 생성합니다. 파라미터들을 해시하여 고유한 키를 만듭니다.
@@ -416,23 +434,57 @@ def invalidate_cache_pattern(pattern: str):
         print(f"Cache invalidation error: {e}")
 
 
+# =============================================================================
+# API 엔드포인트
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# System
+# -----------------------------------------------------------------------------
+
 @app.get("/health", tags=["System"])
 async def health_check():
-    """서버 상태 확인 엔드포인트."""
+    """
+    서버 상태 확인 엔드포인트.
+
+    Returns:
+        dict: {"status": "healthy"} 형태의 상태 정보
+    """
     return {"status": "healthy"}
 
 
 @app.get("/dummy-histo", tags=["Development"])
 async def get_dummy_histogram():
-    """테스트용 더미 히스토그램 데이터를 반환합니다."""
+    """
+    테스트용 더미 히스토그램 데이터를 반환합니다.
+
+    개발 및 디버깅 목적으로 사용되는 샘플 히스토그램 데이터입니다.
+
+    Returns:
+        dict: 10개 구간의 더미 성적 분포 데이터
+    """
     return {"0-10" : 5, "10-20": 15, "20-30": 25, "30-40": 10, "40-50": 8, "50-60": 12, "60-70": 7, "70-80": 3,
             "80-90": 1, "90-100": 0}
 
 
+# -----------------------------------------------------------------------------
+# Student Profile
+# -----------------------------------------------------------------------------
+
 @app.put("/student-profile", response_model=StudentProfileResponse, tags=["Student Profile"])
 async def update_student_profile(profile: StudentProfileCreate, db: Session = Depends(get_db)):
     """
-    학생 프로필을 업데이트합니다. ID 1번 학생의 프로필을 항상 업데이트합니다.
+    학생 프로필을 업데이트합니다.
+
+    ID 1번 학생의 프로필을 항상 업데이트하며, 프로필이 없으면 새로 생성합니다.
+    학생의 선호도 및 특성 정보는 AI 학습 조언 생성 시 활용됩니다.
+
+    Args:
+        profile: 학생 프로필 생성 요청 (preferences 포함)
+        db: 데이터베이스 세션
+
+    Returns:
+        StudentProfileResponse: 업데이트된 학생 프로필 정보
     """
     student_id = 1
     existing_profile = db.query(StudentProfileModel).filter(StudentProfileModel.id == student_id).first()
@@ -455,7 +507,18 @@ async def update_student_profile(profile: StudentProfileCreate, db: Session = De
 @app.get("/student-profile", response_model=StudentProfileResponse, tags=["Student Profile"])
 async def get_student_profile(db: Session = Depends(get_db)):
     """
-    학생 프로필을 조회합니다. ID 1번 학생의 프로필을 반환합니다.
+    학생 프로필을 조회합니다.
+
+    ID 1번 학생의 프로필 정보를 반환합니다.
+
+    Args:
+        db: 데이터베이스 세션
+
+    Returns:
+        StudentProfileResponse: 학생 프로필 정보 (id, preferences)
+
+    Raises:
+        HTTPException: 404 - 학생 프로필이 없는 경우
     """
     student_id = 1
     profile = db.query(StudentProfileModel).filter(StudentProfileModel.id == student_id).first()
@@ -466,9 +529,22 @@ async def get_student_profile(db: Session = Depends(get_db)):
     return profile
 
 
+# -----------------------------------------------------------------------------
+# Course Management
+# -----------------------------------------------------------------------------
+
 @app.post("/courses", response_model=CourseResponse, tags=["Courses"])
 async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
-    """새로운 과목을 생성합니다."""
+    """
+    새로운 과목을 생성합니다.
+
+    Args:
+        course: 과목 생성 요청 (name, course_code, total_students)
+        db: 데이터베이스 세션
+
+    Returns:
+        CourseResponse: 생성된 과목 정보
+    """
     new_course = CourseModel(**course.dict())
     db.add(new_course)
     db.commit()
@@ -478,13 +554,36 @@ async def create_course(course: CourseCreate, db: Session = Depends(get_db)):
 
 @app.get("/courses", response_model=List[CourseResponse], tags=["Courses"])
 async def get_all_courses(db: Session = Depends(get_db)):
-    """모든 과목 목록을 조회합니다."""
+    """
+    모든 과목 목록을 조회합니다.
+
+    Args:
+        db: 데이터베이스 세션
+
+    Returns:
+        List[CourseResponse]: 전체 과목 정보 리스트
+    """
     return db.query(CourseModel).all()
 
 
+# -----------------------------------------------------------------------------
+# Evaluation Items
+# -----------------------------------------------------------------------------
+
 @app.post("/evaluation-items", response_model=EvaluationItemResponse, tags=["Evaluation Items"])
 async def create_evaluation_item(item: EvaluationItemCreate, db: Session = Depends(get_db)):
-    """새로운 평가 항목(과제, 시험 등)을 생성합니다."""
+    """
+    새로운 평가 항목을 생성합니다.
+
+    과제, 시험 등의 평가 항목을 생성합니다.
+
+    Args:
+        item: 평가 항목 생성 요청 (course_id, name, weight, my_score, is_submitted)
+        db: 데이터베이스 세션
+
+    Returns:
+        EvaluationItemResponse: 생성된 평가 항목 정보
+    """
     new_item = EvaluationItemModel(**item.dict())
     db.add(new_item)
     db.commit()
@@ -494,15 +593,35 @@ async def create_evaluation_item(item: EvaluationItemCreate, db: Session = Depen
 
 @app.get("/evaluation-items", response_model=List[EvaluationItemResponse], tags=["Evaluation Items"])
 async def get_all_evaluation_items(db: Session = Depends(get_db)):
-    """모든 평가 항목 목록을 조회합니다."""
+    """
+    모든 평가 항목 목록을 조회합니다.
+
+    Args:
+        db: 데이터베이스 세션
+
+    Returns:
+        List[EvaluationItemResponse]: 전체 평가 항목 정보 리스트
+    """
     return db.query(EvaluationItemModel).all()
 
+
+# -----------------------------------------------------------------------------
+# Course Reviews
+# -----------------------------------------------------------------------------
 
 @app.post("/course-reviews", response_model=CourseReviewResponse, tags=["Course Reviews"])
 async def create_course_review(review: CourseReviewCreate, db: Session = Depends(get_db)):
     """
     새로운 과목 수강평을 생성합니다.
-    리뷰가 추가되면 해당 과목의 모든 캐시가 자동으로 무효화됩니다.
+
+    수강평이 추가되면 AI 조언 생성에 사용되는 모든 캐시가 자동으로 무효화됩니다.
+
+    Args:
+        review: 수강평 생성 요청 (course_id, content)
+        db: 데이터베이스 세션
+
+    Returns:
+        CourseReviewResponse: 생성된 수강평 정보
     """
     new_review = CourseReviewModel(**review.dict())
     db.add(new_review)
@@ -518,13 +637,36 @@ async def create_course_review(review: CourseReviewCreate, db: Session = Depends
 
 @app.get("/course-reviews", response_model=List[CourseReviewResponse], tags=["Course Reviews"])
 async def get_all_course_reviews(db: Session = Depends(get_db)):
-    """모든 과목 수강평 목록을 조회합니다."""
+    """
+    모든 과목 수강평 목록을 조회합니다.
+
+    Args:
+        db: 데이터베이스 세션
+
+    Returns:
+        List[CourseReviewResponse]: 전체 수강평 리스트
+    """
     return db.query(CourseReviewModel).all()
 
 
+# -----------------------------------------------------------------------------
+# Other Student Scores
+# -----------------------------------------------------------------------------
+
 @app.post("/other-student-scores", response_model=ScoreResponse, tags=["Other Student Scores"])
 async def create_other_score(score_data: ScoreCreate, db: Session = Depends(get_db)):
-    """새로운 학생 점수 데이터를 생성합니다."""
+    """
+    새로운 학생 점수 데이터를 생성합니다.
+
+    ML 모델의 히스토그램 예측에 사용되는 샘플 데이터를 추가합니다.
+
+    Args:
+        score_data: 점수 생성 요청 (evaluation_item_id, score)
+        db: 데이터베이스 세션
+
+    Returns:
+        ScoreResponse: 생성된 점수 데이터
+    """
     new_score = OtherStudentScoreModel(**score_data.dict())
     db.add(new_score)
     db.commit()
@@ -534,18 +676,52 @@ async def create_other_score(score_data: ScoreCreate, db: Session = Depends(get_
 
 @app.get("/other-student-scores", response_model=List[ScoreResponse], tags=["Other Student Scores"])
 async def get_other_scores(item_id: Optional[int] = None, db: Session = Depends(get_db)):
-    """학생 점수 목록을 조회합니다. 평가 항목 ID로 필터링할 수 있습니다."""
+    """
+    학생 점수 목록을 조회합니다.
+
+    Args:
+        item_id: 평가 항목 ID (선택사항, 지정 시 해당 항목의 점수만 필터링)
+        db: 데이터베이스 세션
+
+    Returns:
+        List[ScoreResponse]: 학생 점수 데이터 리스트
+    """
     query = db.query(OtherStudentScoreModel)
     if item_id:
         query = query.filter(OtherStudentScoreModel.evaluation_item_id == item_id)
     return query.all()
 
 
+# -----------------------------------------------------------------------------
+# ML Prediction
+# -----------------------------------------------------------------------------
+
 @app.get("/predict-histogram", response_model=HistogramPredictResponse, tags=["ML Prediction"])
 def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
     """
-    평가 항목의 샘플 점수로부터 전체 학급의 성적 분포 히스토그램을 예측합니다.
-    SetTransformer 모델을 사용하여 10개 구간(0-10, 10-20, ..., 90-100)의 분포를 예측합니다.
+    평가 항목의 샘플 점수로부터 전체 학급의 성적 분포를 예측합니다.
+
+    SetTransformer 딥러닝 모델을 사용하여 소수의 샘플 점수로부터
+    전체 학급의 성적 히스토그램을 예측합니다.
+
+    Args:
+        evaluation_item_id: 평가 항목 ID
+        db: 데이터베이스 세션
+
+    Returns:
+        HistogramPredictResponse: 예측된 히스토그램 및 통계 정보
+            - histogram: 10개 구간(0-10, 10-20, ..., 90-100)의 학생 수 분포
+            - num_samples: 예측에 사용된 샘플 수
+            - sample_scores: 사용된 샘플 점수 리스트
+            - total_students: 전체 학생 수
+            - my_score: 사용자의 점수 (있는 경우)
+            - my_percentile: 사용자의 백분위 (my_score가 있는 경우)
+            - statistics: 히스토그램 통계 정보 (평균, 중앙값, 최고/최저, 상위/하위 10%)
+
+    Raises:
+        HTTPException: 503 - ML 모델이 로드되지 않은 경우
+        HTTPException: 404 - 샘플 점수 데이터가 없는 경우
+        HTTPException: 500 - 예측 실패 시
     """
     if ml_predictor is None:
         raise HTTPException(status_code=503, detail="ML model not loaded")
@@ -600,12 +776,39 @@ def predict_histogram(evaluation_item_id: int, db: Session = Depends(get_db)):
     )
 
 
+# -----------------------------------------------------------------------------
+# AI Advice (OpenAI API)
+# -----------------------------------------------------------------------------
+
 @app.get("/courses/{course_id}/advice", response_model=ReviewAnalysisResponse, tags=["AI Advice"])
 def get_course_advice(course_id: int, objective_grade: str, db: Session = Depends(get_db)):
     """
     과목의 수강평을 분석하여 목표 성적 달성을 위한 학습 조언을 제공합니다.
-    OpenAI API를 사용하여 과제 및 시험 난이도 분석과 학습 전략을 생성합니다.
-    Redis 캐시를 사용하여 동일한 요청에 대한 응답 속도를 향상시킵니다.
+
+    OpenAI API를 사용하여 수강평을 분석하고:
+    - 과제 및 시험 난이도를 1-5 척도로 평가
+    - 시험/과제 공통 언급 사항 요약
+    - 목표 성적 달성을 위한 맞춤형 학습 전략 제공
+    - 학생 프로필의 선호도 정보를 고려한 조언
+
+    Redis 캐시를 사용하여 동일한 요청에 대한 응답 속도를 향상시킵니다 (TTL: 1시간).
+
+    Args:
+        course_id: 과목 ID
+        objective_grade: 목표 성적 (예: "A+", "A0", "B+", "B0")
+        db: 데이터베이스 세션
+
+    Returns:
+        ReviewAnalysisResponse: 학습 조언 및 난이도 분석 결과
+            - assignment_difficulty: 과제 난이도 (1-5 척도)
+            - exam_difficulty: 시험 난이도 (1-5 척도)
+            - summary: 시험/과제 공통 언급 요약
+            - advice: 목표 성적 달성을 위한 전략 조언
+
+    Raises:
+        HTTPException: 503 - OpenAI API 키가 설정되지 않은 경우
+        HTTPException: 404 - 해당 과목의 수강평이 없는 경우
+        HTTPException: 500 - AI 분석 실패 시
     """
     if not openai_client:
         raise HTTPException(status_code=503, detail="OpenAI API Key missing")
@@ -714,12 +917,33 @@ def get_semester_advice(
         db: Session = Depends(get_db)
 ):
     """
-    여러 과목의 리뷰를 종합하여 전체 학기 공부 비중(%)과 전략을 짜줍니다.
-    OpenAI API를 사용하여 각 과목별 노력 배분 비율과 전체 학기 조언을 생성합니다.
-    Redis 캐시를 사용하여 동일한 요청에 대한 응답 속도를 향상시킵니다.
+    여러 과목의 수강평을 종합 분석하여 전체 학기 학습 계획을 제공합니다.
 
-    - course_ids의 순서와 target_grades의 순서는 일치해야 합니다.
-    - 예: /semester-advice?course_ids=1&course_ids=2&target_grades=A+&target_grades=B0
+    OpenAI API를 사용하여 각 과목의 수강평을 종합 분석하고:
+    - 각 과목별 노력 배분 비율(%) 계산 (합계 100%)
+    - 전체 학기 운영을 위한 전략 조언 제공
+    - 학생 프로필의 선호도 정보를 고려한 맞춤형 계획
+
+    Redis 캐시를 사용하여 동일한 요청에 대한 응답 속도를 향상시킵니다 (TTL: 1시간).
+
+    사용 예시:
+        /semester-advice?course_ids=1&course_ids=2&course_ids=3&target_grades=A+&target_grades=B0&target_grades=A0
+
+    Args:
+        course_ids: 수강할 과목 ID 리스트
+        target_grades: 각 과목의 목표 성적 리스트 (course_ids와 순서 일치 필요)
+        db: 데이터베이스 세션
+
+    Returns:
+        SemesterPlanResponse: 학기 학습 계획 및 노력 배분
+            - courses: 각 과목별 노력 비율 (course_index, effort_percent)
+            - overall_advice: 전체 학기 운영을 위한 조언 (1-2문장)
+
+    Raises:
+        HTTPException: 503 - OpenAI API 키가 설정되지 않은 경우
+        HTTPException: 400 - 과목 수와 목표 성적 수가 일치하지 않는 경우
+        HTTPException: 404 - 선택한 과목들에 대한 수강평이 없는 경우
+        HTTPException: 500 - AI 분석 실패 시
     """
     if not openai_client:
         raise HTTPException(status_code=503, detail="OpenAI API Key missing")
@@ -844,18 +1068,31 @@ def get_semester_advice(
         raise HTTPException(status_code=500, detail=f"AI 분석 중 오류가 발생했습니다.")
 
 
+# -----------------------------------------------------------------------------
+# Cache Management
+# -----------------------------------------------------------------------------
+
 @app.delete("/cache/clear", tags=["System"])
 async def clear_cache(pattern: str = "*"):
     """
     Redis 캐시를 무효화합니다.
 
+    특정 패턴에 일치하는 캐시 키들을 삭제하여 캐시를 무효화합니다.
+    AI 조언 응답이 변경되었을 때 수동으로 캐시를 갱신할 수 있습니다.
+
+    사용 예시:
+        - DELETE /cache/clear - 모든 캐시 삭제
+        - DELETE /cache/clear?pattern=course_advice:* - 과목 조언 캐시만 삭제
+        - DELETE /cache/clear?pattern=semester_advice:* - 학기 조언 캐시만 삭제
+
     Args:
         pattern: 삭제할 캐시 키 패턴 (기본값: "*" 모든 캐시)
-                 예: "cache:course_advice:*" - 과목 조언 캐시만 삭제
-                     "cache:semester_advice:*" - 학기 조언 캐시만 삭제
 
     Returns:
-        삭제 결과 메시지
+        dict: 삭제 결과 메시지
+
+    Raises:
+        HTTPException: 503 - Redis가 사용 불가능한 경우
     """
     if not redis_client:
         raise HTTPException(status_code=503, detail="Redis not available")
@@ -870,14 +1107,35 @@ async def clear_cache(pattern: str = "*"):
          tags=["ML Prediction"])
 def get_cumulative_histogram(course_id: int, db: Session = Depends(get_db)):
     """
-    과목의 모든 평가 항목들의 히스토그램을 가중치에 따라 누적합니다.
-    각 evaluation_item의 히스토그램에 weight를 곱한 뒤 모두 합산하여 최종 성적 분포를 예측합니다.
+    과목의 모든 평가 항목을 가중치에 따라 누적하여 최종 성적 분포를 예측합니다.
 
-    예: 과제1(20%) + 과제2(20%) + 중간고사(30%) + 기말고사(30%)
+    각 평가 항목(과제, 시험 등)의 히스토그램을 가중치(weight)에 따라 합산하여
+    과목의 최종 성적 분포를 계산합니다.
 
-    사용자의 점수(my_score)가 있는 경우, 가중 평균으로 계산한 누적 점수(my_cumulative_score)와
-    히스토그램 내에서의 백분위(my_percentile)도 함께 반환합니다.
-    백분위는 0-100 범위의 값으로, 사용자보다 낮은 점수를 받은 학생들의 비율을 나타냅니다.
+    예시:
+        - 과제1 (20%) + 과제2 (20%) + 중간고사 (30%) + 기말고사 (30%)
+        - 각 평가 항목의 히스토그램 × 가중치 → 합산 → 최종 히스토그램
+
+    사용자의 점수가 있는 경우:
+        - my_cumulative_score: 가중 평균으로 계산한 누적 점수
+        - my_percentile: 히스토그램 내에서의 백분위 (0-100)
+
+    Args:
+        course_id: 과목 ID
+        db: 데이터베이스 세션
+
+    Returns:
+        CumulativeHistogramResponse: 누적 히스토그램 및 통계 정보
+            - cumulative_histogram: 가중 평균 누적 히스토그램
+            - total_weight: 전체 가중치 합계
+            - evaluation_items: 각 평가 항목별 히스토그램과 가중치 정보
+            - my_cumulative_score: 사용자의 가중 평균 점수 (있는 경우)
+            - my_percentile: 사용자의 백분위 (있는 경우)
+            - statistics: 누적 히스토그램 통계 정보
+
+    Raises:
+        HTTPException: 503 - ML 모델이 로드되지 않은 경우
+        HTTPException: 404 - 해당 과목의 평가 항목이 없는 경우
     """
     if ml_predictor is None:
         raise HTTPException(status_code=503, detail="ML model not loaded")
