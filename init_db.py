@@ -1,10 +1,42 @@
+"""
+데이터베이스 초기화 모듈.
+
+이 모듈은 SQLite 데이터베이스를 초기화하고 필요한 테이블 스키마를 생성합니다.
+기존 데이터베이스 파일이 있는 경우 삭제 후 새로 생성합니다.
+
+테이블 구조:
+    - student_profile: 학생 프로필 정보 (id, preferences)
+    - courses: 강의 정보 (id, name, course_code, total_students)
+    - evaluation_items: 평가 항목 (id, course_id, name, weight, my_score, is_submitted)
+    - other_student_scores: 다른 학생들의 점수 데이터 (id, evaluation_item_id, score)
+    - course_reviews: 강의 수강평 (id, course_id, content)
+
+사용법:
+    python init_db.py
+"""
+
 import sqlite3
 import os
 
+# 데이터베이스 파일명 상수
 DB_NAME = "hackathon.db"
 
 
-def init_db():
+def init_db() -> None:
+    """
+    데이터베이스를 초기화하고 테이블 스키마를 생성합니다.
+
+    이 함수는 다음 작업을 수행합니다:
+        1. 기존 데이터베이스 파일이 있으면 삭제
+        2. 새로운 SQLite 데이터베이스 연결 생성
+        3. 외래 키 제약조건 활성화
+        4. 5개의 테이블 생성 (student_profile, courses, evaluation_items,
+           other_student_scores, course_reviews)
+
+    Note:
+        이 함수를 실행하면 기존 데이터가 모두 삭제됩니다.
+        프로덕션 환경에서는 주의해서 사용해야 합니다.
+    """
     # 기존 파일 삭제 (스키마 변경 적용)
     if os.path.exists(DB_NAME):
         os.remove(DB_NAME)

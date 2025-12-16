@@ -1,3 +1,32 @@
+"""
+KLUE (고려대학교 강의평가 사이트) 크롤러 모듈.
+
+이 모듈은 Selenium을 사용하여 KLUE 웹사이트에서 강의 수강평을 크롤링합니다.
+로그인 후 지정된 강의들의 수강평을 수집하여 CSV 파일로 저장합니다.
+
+주요 기능:
+    - KLUE 웹사이트 로그인
+    - 학수번호 + 교수명으로 강의 검색
+    - 무한 스크롤 페이지에서 모든 수강평 수집
+    - CSV 파일로 결과 저장
+
+출력 파일:
+    klue_reviews_multi.csv
+    컬럼: course_code, professor, lecture_id, year, semester, review
+
+사용법:
+    python crawling/klue_crawler.py
+
+환경 변수:
+    KLUE_ID: KLUE 로그인 아이디 (선택, 없으면 입력 프롬프트)
+    KLUE_PW: KLUE 로그인 비밀번호 (선택, 없으면 입력 프롬프트)
+
+의존성:
+    - selenium
+    - webdriver-manager
+    - Chrome 브라우저
+"""
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -12,7 +41,20 @@ import csv
 import re
 
 
-def create_driver():
+# =============================================================================
+# 브라우저 드라이버 설정
+# =============================================================================
+
+def create_driver() -> webdriver.Chrome:
+    """
+    Chrome WebDriver 인스턴스를 생성합니다.
+
+    자동으로 ChromeDriver를 다운로드하고 설치한 후,
+    최대화된 브라우저 창으로 드라이버를 반환합니다.
+
+    Returns:
+        webdriver.Chrome: 설정된 Chrome WebDriver 인스턴스
+    """
     options = Options()
     options.add_argument("--start-maximized")
     driver = webdriver.Chrome(
@@ -23,11 +65,24 @@ def create_driver():
     return driver
 
 
+# =============================================================================
+# 유틸리티 함수
+# =============================================================================
 
-def scroll_to_bottom(driver, pause=1.0, max_rounds=50):
+def scroll_to_bottom(driver: webdriver.Chrome, pause: float = 1.0, max_rounds: int = 50) -> None:
     """
-    window 전체를 아래로 스크롤하면서
-    더 이상 새로 로딩되는 게 없을 때까지 반복.
+    무한 스크롤 페이지에서 끝까지 스크롤합니다.
+
+    페이지 높이가 더 이상 변하지 않을 때까지 반복적으로
+    페이지 하단으로 스크롤하여 동적 콘텐츠를 모두 로드합니다.
+
+    Args:
+        driver: Selenium WebDriver 인스턴스
+        pause: 각 스크롤 후 대기 시간 (초)
+        max_rounds: 최대 스크롤 반복 횟수
+
+    Note:
+        3회 연속 페이지 높이 변화가 없으면 스크롤을 종료합니다.
     """
     last_height = driver.execute_script("return document.body.scrollHeight")
     stable_rounds = 0
@@ -50,9 +105,20 @@ def scroll_to_bottom(driver, pause=1.0, max_rounds=50):
         if stable_rounds >= 3:
             break
 
-def get_lecture_reviews(driver, lecture_id: int):
+# =============================================================================
+# 크롤링 함수
+# =============================================================================
+
+def get_lecture_reviews(driver: webdriver.Chrome, lecture_id: int) -> list[str]:
     """
-    특정 강의(lectures/{id}) 페이지에서 후기 본문 텍스트들만 리스트로 가져온다.
+    특정 강의 페이지에서 모든 수강평을 수집합니다.
+
+    Args:
+        driver: Selenium WebDriver 인스턴스
+        lecture_id: KLUE 강의 ID (URL의 /lectures/{id} 부분)
+
+    Returns:
+        list[str]: 수강평 텍스트 리스트
     """
     wait = WebDriverWait(driver, 10)
 
@@ -77,10 +143,19 @@ def get_lecture_reviews(driver, lecture_id: int):
     return reviews
 
 
-def parse_year_sem(header_text: str):
+def parse_year_sem(header_text: str) -> tuple[int | None, int | None]:
     """
-    '2025년 1학기 - COSE341(01)' 같은 텍스트에서 연도/학기 추출.
-    못 찾으면 None, None 반환.
+    강의 헤더 텍스트에서 연도와 학기 정보를 추출합니다.
+
+    Args:
+        header_text: 강의 정보 텍스트 (예: "2025년 1학기 - COSE341(01)")
+
+    Returns:
+        tuple: (연도, 학기) - 파싱 실패 시 (None, None)
+
+    Example:
+        >>> parse_year_sem("2025년 1학기 - COSE341(01)")
+        (2025, 1)
     """
     m = re.search(r"(\d{4})년\s*([0-9])학기", header_text)
     if not m:
@@ -90,10 +165,21 @@ def parse_year_sem(header_text: str):
     return year, semester
 
 
-def get_lectures_by_prof(driver, search_query: str, professor_name: str):
+def get_lectures_by_prof(driver: webdriver.Chrome, search_query: str, professor_name: str) -> list[dict]:
     """
-    검색 결과 페이지에서 특정 교수의 강의 정보를 모두 가져온다.
-    return: 리스트[ {id, year, semester} ]
+    검색 결과 페이지에서 특정 교수의 강의 목록을 수집합니다.
+
+    학수번호로 검색한 결과에서 특정 교수의 강의만 필터링하여
+    강의 ID, 연도, 학기 정보를 추출합니다.
+
+    Args:
+        driver: Selenium WebDriver 인스턴스
+        search_query: 검색어 (학수번호, 예: "COSE341")
+        professor_name: 교수명 (예: "유혁")
+
+    Returns:
+        list[dict]: 강의 정보 리스트
+            각 항목: {"id": int, "year": int|None, "semester": int|None}
     """
     wait = WebDriverWait(driver, 10)
 
@@ -166,20 +252,30 @@ def get_lectures_by_prof(driver, search_query: str, professor_name: str):
     return lectures
 
 
+# =============================================================================
+# 메인 실행 코드
+# =============================================================================
+
+# 로그인 정보 (환경 변수 또는 사용자 입력)
 USER_ID = os.getenv("KLUE_ID") or input("KLUE 아이디: ")
 USER_PW = os.getenv("KLUE_PW") or getpass("KLUE 비밀번호: ")
 
+# WebDriver 초기화
 driver = create_driver()
 wait = WebDriverWait(driver, 10)
 
+# 크롤링할 강의 목록 설정
+# 각 항목: search_query (학수번호), professor_name (교수명)
 TARGET_LECTURES = [
-    {"search_query": "COSE111", "professor_name": "유용재"},
-    {"search_query": "COSE341", "professor_name": "유혁"},
-    {"search_query": "COSE389", "professor_name": "이문영"},
+    {"search_query": "COSE111", "professor_name": "유용재"},   # 전산수학I
+    {"search_query": "COSE341", "professor_name": "유혁"},     # 운영체제
+    {"search_query": "COSE389", "professor_name": "이문영"},   # 기업가정신과리더십
 ]
 
 try:
-    # ---------------- 로그인 ----------------
+    # =========================================================================
+    # 1단계: KLUE 웹사이트 로그인
+    # =========================================================================
     driver.get("https://klue.kr/")
 
     login_link = wait.until(
@@ -205,8 +301,10 @@ try:
     time.sleep(5)
     print("로그인 후 URL:", driver.current_url)
 
-    # ---------------- 여러 강의에 대해 강의 목록 + 후기 크롤링 ----------------
-    rows = []  # 한 번에 모아서 마지막에 CSV로 저장
+    # =========================================================================
+    # 2단계: 강의별 수강평 크롤링
+    # =========================================================================
+    rows = []  # 수집된 모든 수강평을 저장할 리스트
 
     for target in TARGET_LECTURES:
         search_query = target["search_query"]
@@ -240,7 +338,9 @@ try:
                     }
                 )
 
-    # ---------------- CSV로 한 번에 저장 ----------------
+    # =========================================================================
+    # 3단계: CSV 파일로 결과 저장
+    # =========================================================================
     output_file = "klue_reviews_multi.csv"
     with open(output_file, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(

@@ -1,13 +1,37 @@
+"""
+CSV 데이터 임포트 모듈.
+
+이 모듈은 크롤링된 강의 수강평 CSV 파일을 읽어 SQLite 데이터베이스에 저장합니다.
+CSV 파일의 학수번호를 기준으로 강의를 생성하거나 기존 강의에 수강평을 추가합니다.
+
+입력 파일 형식:
+    - CSV 파일 (UTF-8-BOM 인코딩 지원)
+    - 필수 컬럼: course_code, review
+    - 선택 컬럼: professor, lecture_id, year, semester
+
+사용법:
+    python import_csv.py
+
+주의사항:
+    - init_db.py를 먼저 실행하여 데이터베이스를 초기화해야 합니다.
+    - CSV 파일 경로: crawling/klue_reviews_multi.csv
+"""
+
 import csv
 import sqlite3
 import os
+
+# =============================================================================
+# 경로 및 상수 설정
+# =============================================================================
 
 # 현재 파일 경로 기준 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_FILE = os.path.join(BASE_DIR, "crawling", "klue_reviews_multi.csv")
 DB_NAME = os.path.join(BASE_DIR, "hackathon.db")
 
-# 학수번호 -> 한글 강의명 매핑
+# 학수번호 -> 한글 강의명 매핑 테이블
+# 새로운 과목 추가 시 이 딕셔너리에 매핑을 추가해야 합니다.
 COURSE_NAME_MAP = {
         "COSE111": "전산수학I",
         "COSE341": "운영체제",
@@ -15,7 +39,28 @@ COURSE_NAME_MAP = {
 }
 
 
-def import_data():
+# =============================================================================
+# 메인 함수
+# =============================================================================
+
+def import_data() -> None:
+    """
+    CSV 파일에서 수강평 데이터를 읽어 데이터베이스에 저장합니다.
+
+    이 함수는 다음 작업을 수행합니다:
+        1. CSV 파일 존재 여부 확인
+        2. UTF-8-BOM 인코딩으로 CSV 파일 읽기
+        3. 각 행에 대해:
+           - 학수번호로 기존 강의 조회 또는 새 강의 생성
+           - 수강평을 course_reviews 테이블에 저장
+
+    Raises:
+        파일이 없거나 필수 컬럼이 없는 경우 에러 메시지를 출력하고 종료합니다.
+
+    Note:
+        - 빈 course_code나 review는 건너뜁니다.
+        - 100개 단위로 진행 상황을 출력합니다.
+    """
     if not os.path.exists(CSV_FILE):
         print(f"❌ 오류: 파일을 찾을 수 없습니다.")
         print(f"   👉 경로: {CSV_FILE}")

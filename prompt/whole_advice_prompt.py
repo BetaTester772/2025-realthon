@@ -1,35 +1,81 @@
+"""
+학기 전체 학습 계획 생성 프롬프트 테스트 모듈.
+
+이 모듈은 OpenAI API를 사용하여 여러 과목의 수강평을 분석하고
+학기 전체 학습 계획(노력 배분 비율)과 종합 조언을 생성합니다.
+
+기능:
+    - CSV 파일에서 수강평 데이터 로드
+    - OpenAI GPT 모델을 통한 학습 계획 생성
+    - JSON Schema를 사용한 구조화된 응답 생성
+
+출력 형식 (JSON):
+    {
+        "courses": [
+            {"course_index": 1, "effort_percent": 40},
+            {"course_index": 2, "effort_percent": 30},
+            {"course_index": 3, "effort_percent": 30}
+        ],
+        "overall_advice": "전체 학기 운영을 위한 조언..."
+    }
+
+사용법:
+    python prompt/whole_advice_prompt.py
+
+환경 변수:
+    OPENAI_API_KEY: OpenAI API 키 (필수)
+"""
+
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import pandas as pd
 
+# 환경 변수 로드 (.env 파일에서 OPENAI_API_KEY 읽기)
 load_dotenv()
 
+# =============================================================================
+# OpenAI 클라이언트 초기화
+# =============================================================================
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
-# ---------- CSV 읽기 ----------
+# =============================================================================
+# 수강평 데이터 로드
+# =============================================================================
+# CSV 파일에서 강의 ID와 수강평 내용을 읽어옴
 df = pd.read_csv("../crawling/klue_reviews_multi.csv")
 reviews = df[["lecture_id", "review"]].to_dict(orient="records")
 
+# =============================================================================
+# 수강평 데이터 전처리
+# =============================================================================
+# 수강평 데이터를 딕셔너리 형태로 변환
 course_reviews = []
 for review in reviews:
     course_reviews.append(
             {
-                    "course_id" : review["lecture_id"],
-                    "content"   : review["review"],
-                    "generosity": 0,
-                    "id"        : len(course_reviews) + 1,
+                    "course_id" : review["lecture_id"],  # 강의 ID
+                    "content"   : review["review"],       # 수강평 본문
+                    "generosity": 0,                      # 채점 관대함 (미사용)
+                    "id"        : len(course_reviews) + 1,  # 순차적 ID
             }
     )
 
+# 수강평 내용만 추출하여 줄바꿈으로 연결
 course_reviews_str = "\n".join(
         [f"{review['content']}" for review in course_reviews]
 )
 
+# 각 과목의 목표 성적 (순서대로 과목 1, 2, 3에 해당)
 objective_grade = ["A+", "A", "B+"]
 
-# ---------- JSON Schema 직접 정의 ----------
+# =============================================================================
+# OpenAI 응답 JSON Schema 정의
+# =============================================================================
+# 구조화된 응답을 위한 JSON Schema
+# - courses: 각 과목별 노력 투자 비율 (합계 100)
+# - overall_advice: 전체 학기 조언 (1-2문장)
 semester_plan_schema = {
         "type"                : "object",
         "properties"          : {
@@ -64,7 +110,10 @@ semester_plan_schema = {
         "additionalProperties": False
 }
 
-# ---------- 모델 호출 ----------
+# =============================================================================
+# OpenAI API 호출
+# =============================================================================
+# GPT 모델에 수강평과 목표 성적을 전달하여 학습 계획 생성
 response = client.responses.create(
         model="gpt-5-mini",
         input=f"""
