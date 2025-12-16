@@ -440,6 +440,13 @@ SOFTWARE.
 
 이슈가 있거나 질문이 있으시면 GitHub Issues를 이용해주세요.
 
+## 기여자
+
+- **BetaTester772**: Backend & AI/ML
+- **2022148084**: Backend
+- **garden-j**: Prompt Engineering
+- **claude**: Documentation
+
 ## 관련 링크
 
 - [FastAPI 문서](https://fastapi.tiangolo.com/)
