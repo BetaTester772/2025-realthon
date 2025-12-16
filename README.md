@@ -442,10 +442,10 @@ SOFTWARE.
 
 ## 기여자
 
-- **BetaTester772**: Backend & AI/ML
-- **2022148084**: Backend
-- **garden-j**: Prompt Engineering
-- **claude**: Documentation
+- **[BetaTester772](https://github.com/BetaTester772)**: Backend & AI/ML
+- **[2022148084](https://github.com/2022148084)**: Backend
+- **[garden-j](https://github.com/garden-j)**: Prompt Engineering
+- **[claude](https://github.com/claude)**: Documentation
 
 ## 관련 링크
 
