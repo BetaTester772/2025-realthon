@@ -1,33 +1,77 @@
+"""
+개별 과목 학습 조언 생성 프롬프트 테스트 모듈.
+
+이 모듈은 OpenAI API를 사용하여 특정 과목의 수강평을 분석하고
+목표 성적 달성을 위한 학습 전략 조언을 생성합니다.
+
+분석 내용:
+    - 과제 난이도 (1-5 척도)
+    - 시험 난이도 (1-5 척도)
+    - 시험/과제 공통 언급 사항 요약
+    - 목표 성적에 따른 학습 전략 조언
+
+난이도 척도:
+    1: 매우 쉬움
+    2: 쉬움
+    3: 보통
+    4: 어려움
+    5: 매우 어려움
+
+사용법:
+    python prompt/each_advice_prompt.py
+
+환경 변수:
+    OPENAI_API_KEY: OpenAI API 키 (필수)
+"""
+
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import pandas as pd
-from pydantic import BaseModel, Field  # ← 새로 추가
+from pydantic import BaseModel, Field  # Pydantic 스키마 정의용 (미사용)
 
+# 환경 변수 로드 (.env 파일에서 OPENAI_API_KEY 읽기)
 load_dotenv()
 
+# =============================================================================
+# OpenAI 클라이언트 초기화
+# =============================================================================
 api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key)
 
+# =============================================================================
+# 수강평 데이터 로드
+# =============================================================================
+# COSE341(운영체제) 과목의 수강평 CSV 파일 로드
 df = pd.read_csv("../crawling/cose341_klue_reviews.csv")
 reviews = df["review"].tolist()
 
+# =============================================================================
+# 수강평 데이터 전처리
+# =============================================================================
+# 수강평 데이터를 딕셔너리 형태로 변환
 course_reviews = []
 
 for review in reviews:
     course_reviews.append(
             {
-                    "course_id" : 1,
-                    "content"   : review,
-                    "generosity": 0,
-                    "id"        : len(course_reviews) + 1
+                    "course_id" : 1,                        # 과목 ID (고정값)
+                    "content"   : review,                   # 수강평 본문
+                    "generosity": 0,                        # 채점 관대함 (미사용)
+                    "id"        : len(course_reviews) + 1   # 순차적 ID
             }
     )
 
+# 수강평 내용만 추출하여 줄바꿈으로 연결
 course_reviews_str = "\n".join([f"{review['content']}" for review in course_reviews])
 
+# 목표 성적 설정
 objective_grade = "B+"
 
+# =============================================================================
+# OpenAI API 호출
+# =============================================================================
+# GPT 모델에 수강평과 목표 성적을 전달하여 학습 조언 생성
 response = client.responses.create(
         model="gpt-5-mini",
         input=f"""
