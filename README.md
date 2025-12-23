@@ -40,6 +40,33 @@
 - **Matplotlib** - 데이터 시각화
 - **OpenAI API** - AI 기능 통합
 
+## 시스템 아키텍처
+
+![System Architecture](figure/architecture_diagram.png)
+
+전체 시스템은 다음과 같은 구조로 구성됩니다:
+
+### Client Layer
+- **User Interface**: 사용자가 프론트엔드를 통해 시스템과 상호작용
+- **Frontend (Vercel)**: Vite + React 기반 웹 애플리케이션
+
+### Backend Layer (Oracle Cloud + Docker)
+- **Caddy (Docker)**: 리버스 프록시 및 SSL 종료
+- **FastAPI**:
+  - App Router: 라우팅 및 요청 처리
+  - Business Logic: 핵심 비즈니스 로직
+- **Redis (Docker)**: OpenAI API 응답 캐싱
+- **ML Predictor (PyTorch)**: SetTransformer 기반 히스토그램 예측 모델
+- **SQLite Database**: ORM을 통한 데이터 영속성
+
+### External Services
+- **OpenAI API (GPT-5-mini)**: AI 기반 학습 조언 생성
+
+### Deployment
+- **Oracle Cloud**: 백엔드 서버 호스팅
+- **Docker**: 모든 백엔드 컴포넌트 컨테이너화
+- **Vercel**: 프론트엔드 정적 배포
+
 ## 프로젝트 구조
 
 ```
