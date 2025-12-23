@@ -47,6 +47,9 @@
 ├── main.py                    # FastAPI 애플리케이션 메인
 ├── hackathon.db               # SQLite 데이터베이스
 ├── pyproject.toml             # 프로젝트 의존성 관리
+├── Dockerfile                 # Docker 이미지 빌드 설정
+├── docker-compose.yml         # Docker Compose 서비스 구성
+├── Caddyfile                  # Caddy 리버스 프록시 설정
 ├── ML/                        # 머신러닝 모듈
 │   ├── model_loader.py        # 모델 아키텍처 및 예측기
 │   └── best_model_nnj359uw.pt # 학습된 모델 체크포인트
@@ -123,6 +126,15 @@ docker compose up -d
 
 # 로그 확인
 docker compose logs -f
+
+# 서비스 재시작 (코드 변경 후 즉시 적용)
+docker compose restart
+
+# 특정 서비스만 재시작
+docker compose restart app
+
+# 이미지 재빌드 후 재시작 (Dockerfile 변경 시)
+docker compose up -d --build
 
 # 서비스 중지
 docker compose down
