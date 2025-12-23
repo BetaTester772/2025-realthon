@@ -73,7 +73,8 @@
 2025-realthon/
 ├── main.py                    # FastAPI 애플리케이션 메인
 ├── hackathon.db               # SQLite 데이터베이스
-├── pyproject.toml             # 프로젝트 의존성 관리
+├── pyproject.toml             # 프로젝트 의존성 정의
+├── uv.lock                    # 의존성 버전 잠금 파일
 ├── Dockerfile                 # Docker 이미지 빌드 설정
 ├── docker-compose.yml         # Docker Compose 서비스 구성
 ├── Caddyfile                  # Caddy 리버스 프록시 설정
@@ -91,17 +92,43 @@
 - Python 3.11
 - uv (권장) 또는 pip
 
+### 의존성 관리
+
+본 프로젝트는 uv를 사용하여 Python 의존성을 관리합니다.
+
+- **pyproject.toml**: 프로젝트 메타데이터 및 의존성 정의
+- **uv.lock**: 정확한 의존성 버전 잠금 (재현 가능한 빌드)
+
+Docker 빌드 시 `uv sync --frozen`을 사용하여 uv.lock에 고정된 버전으로 설치합니다.
+
 ### 설치
+
+#### 방법 1: uv 사용 (권장)
 
 ```bash
 # 저장소 클론
 git clone https://github.com/BetaTester772/2025-realthon.git
 cd 2025-realthon
 
-# uv를 사용한 의존성 설치 (권장)
+# uv 설치 (필요한 경우)
+curl -LsSf https://astral.sh/uv/install.sh | less
+
+# 의존성 설치 (uv.lock 기반)
 uv sync
 
-# 또는 pip 사용
+# 의존성 업데이트가 필요한 경우
+uv lock
+uv sync
+```
+
+#### 방법 2: pip 사용
+
+```bash
+# 저장소 클론
+git clone https://github.com/BetaTester772/2025-realthon.git
+cd 2025-realthon
+
+# pip로 설치
 pip install -e .
 ```
 
