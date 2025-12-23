@@ -1,33 +1,46 @@
-# Caddyfile for API server with CloudFlare DNS (DNS Only mode)
-# CloudFlare should be set to "DNS Only" (grey cloud) for API servers
-
 {
-    # Global options
     email hoseong8115.dev@gmail.com
 }
 
-# Replace with your actual domain
 realthon.betatester772.dev {
-    # Direct SSL from Caddy (no CloudFlare proxy)
-    # Caddy automatically gets Let's Encrypt certificate
 
-    reverse_proxy app:8000 {
-        # Health check
-        health_uri /health
-        health_interval 10s
-        health_timeout 5s
-
-        # Standard proxy headers
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer-when-downgrade"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
     }
 
-    # Enable gzip compression
+    @blocked path \
+        /.env /.env/* \
+        /.git /.git/* \
+        /admin /admin/* \
+        /wp-admin /wp-admin/* \
+        /phpmyadmin /phpmyadmin/* \
+        /cgi-bin /cgi-bin/* \
+        /server-status /server-status/* \
+        /*.php
+
+    handle @blocked {
+        respond 403
+    }
+
+    handle {
+        reverse_proxy app:8000 {
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
     encode gzip
 
-    # Logging
     log {
         output file /var/log/caddy/access.log
         format json
