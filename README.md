@@ -331,36 +331,52 @@ AI 조언 기능은 OpenAI API를 사용하며, Redis 캐싱을 통해 동일한
 
 ## ML 모델 아키텍처
 
-### FlexibleHistogramPredictor (SetTransformer 기반)
+### FlexibleHistogramPredictor (SetTransformer-inspired ISAB-style Encoder)
 
-프로젝트는 **Set Transformer** 아키텍처를 기반으로 한 딥러닝 모델을 사용하여 소수의 샘플 점수로부터 전체 학급의 성적 분포를 예측합니다.
+프로젝트는 **SetTransformer에서 영감을 받은** 딥러닝 모델을 사용하여 소수의 샘플 점수(예: 10개)로부터 전체 학급의 성적 분포(30명 학생의 10개 구간 히스토그램)를 예측합니다. 이 모델은 ISAB(Induced Set Attention Block) 스타일의 인코더와 간소화된 mean pooling 디코더를 결합한 아키텍처입니다.
 
 #### 모델 구조
 
 ```
 Input (샘플 점수)
+  → 전처리 (정렬, 0-1 정규화)
   → Input Projection (1 → hidden_dim)
-  → SetTransformer Encoder (Inducing Points 기반)
-  → Pooling (평균)
-  → Decoder (hidden_dim → 10 bins)
+  → SetTransformer-style Encoder (ISAB-style: Inducing Points 기반)
+  → Mean Pooling (집합 특성 집약)
+  → MLP Decoder (hidden_dim → 10 bins)
   → Softmax
 Output (히스토그램 확률 분포)
 ```
 
 #### 핵심 컴포넌트
 
-1. **MultiheadAttentionBlock**
-    - Multi-head Self-Attention with residual connections
+1. **입력 전처리**
+    - **정렬**: 입력 샘플 점수를 오름차순으로 정렬하여 순서를 표준화
+    - **정규화**: 0-1 범위로 정규화 (점수/100)
+    - 목적: 동일한 점수 집합에 대해 일관된 입력 표현 제공
+
+2. **MultiheadAttentionBlock (MAB)**
+    - Multi-head Cross-Attention with residual connections
     - Layer Normalization
     - Feed-Forward Network (dim → 4×dim → dim)
     - Dropout regularization
 
-2. **SetTransformerEncoder**
-    - **Inducing Points (IP)**: 학습 가능한 latent representations (기본 16개)
-    - 집합의 순서에 불변한(permutation-invariant) 인코딩
-    - 두 단계 attention:
-        1. IP가 입력 집합 attend → H 생성
-        2. 입력 집합이 H attend → 인코딩된 표현
+3. **SetTransformerEncoder (ISAB-style)**
+    - **Inducing Points (I)**: 학습 가능한 latent representations (기본 16개)
+    - ISAB 구조로 집합 원소 간 관계를 효율적으로 인코딩
+    - 두 단계 attention (ISAB 방식):
+        1. H = MAB(I, X): Inducing Points가 입력 집합 X를 attend → H 생성
+        2. Output = MAB(X, H): 입력 집합 X가 H를 attend → 인코딩된 표현
+    - **참고**: 전체 SetTransformer의 PMA(Pooling by Multihead Attention)는 사용하지 않음
+
+4. **집약(Aggregation)**
+    - Mean Pooling: 인코딩된 집합 요소들의 평균을 계산
+    - PMA 대신 mean pooling을 사용하여 경량화 및 프로토타이핑 효율성 확보
+    - 집합 전체의 특성을 단일 벡터로 요약
+
+5. **디코더**
+    - 단순 MLP + Softmax
+    - 집약된 특징 벡터를 10개 구간의 확률 분포로 변환
 
 #### 하이퍼파라미터
 
@@ -388,22 +404,68 @@ Output (히스토그램 확률 분포)
     - `hard`: 평균 40-65점, 표준편차 8-15
     - `bimodal`: 이중 정규분포 (40-60점 그룹 + 70-90점 그룹)
 - 각 클래스당 30명 학생 기준
+- **중요**: 이 모델은 합성 데이터로 학습되었으며, 실제 환경에서의 일반화 성능은 제한적일 수 있습니다.
 
-### 모델 평가 지표
+### 아키텍처 설계 근거
+
+본 프로젝트에서 SetTransformer-inspired 아키텍처를 선택한 이유는 다음과 같습니다:
+
+#### 1. 입력 표준화와 집합 표현
+- 샘플 점수는 **점수 집합**으로 취급되며, 전처리에서 정렬하여 순서를 표준화
+- 예: [75, 82, 68]과 [68, 75, 82]는 모두 [68, 75, 82]로 변환되어 동일한 예측 결과 생성
+- SetTransformer 아키텍처는 정렬된 집합에서도 유효:
+  - Attention 메커니즘은 원소 간 관계(패턴, 분산, 클러스터링)를 학습
+  - Mean pooling은 집합 전체의 특성을 하나의 벡터로 집약
+  - 모델은 "정렬된 점수 시퀀스"의 통계적 패턴을 히스토그램으로 매핑하도록 학습
+
+#### 2. 효율적인 전역 상호작용
+- **Inducing Points (IP)** 메커니즘을 통해 집합 전체의 패턴을 효율적으로 포착
+- 작은 집합(10개 샘플)에서도 아키텍처 일관성을 유지하고 확장 가능성 확보
+- ISAB-style attention은 O(nm) 복잡도로 전역 상호작용을 근사 (n=집합 크기, m=inducing points)
+
+#### 3. 경량화된 디코더
+- **Mean Pooling vs PMA**: 해커톤/프로토타이핑 환경에서 빠른 구현과 효율성을 위해 PMA 대신 mean pooling 선택
+- Mean pooling은 집합의 특성을 단순 평균으로 요약하며 계산 비용이 낮음
+- MLP 디코더로 히스토그램 확률 분포를 직접 예측
+
+#### 4. 이론적 배경
+- **Deep Sets** (Zaheer et al., 2017): 집합 함수의 순서 불변성을 위한 이론적 기반
+- **Attention Is All You Need** (Vaswani et al., 2017): Multi-head attention의 표현력
+- **Set Transformer** (Lee et al., 2019): 집합 데이터를 위한 효율적인 attention 메커니즘
+
+### 학습 및 평가 지표
+
+#### 학습 손실 함수
+- **MSE Loss**: 예측 확률 분포와 실제 히스토그램 간의 Mean Squared Error
+- 히스토그램의 각 구간 확률을 직접 최적화
+
+#### 평가 지표
 
 모델 성능은 다음 세 가지 지표로 측정됩니다:
 
-- **MSE** (Mean Squared Error)
+1. **MSE** (Mean Squared Error)
     - 예측 히스토그램과 실제 히스토그램의 평균 제곱 오차
+    - 각 구간의 확률값 차이를 제곱하여 평균
+    - **특징**: 개별 구간의 정확도를 측정하나, 분포의 형태적 유사성은 포착하지 못함
     - 낮을수록 정확한 예측
 
-- **JS Divergence** (Jensen-Shannon Divergence)
-    - 두 확률 분포 간의 대칭적 거리 측정
+2. **JS Divergence** (Jensen-Shannon Divergence)
+    - 두 확률 분포 간의 대칭적 거리 측정 (KL divergence의 대칭 버전)
+    - **특징**: 분포 간의 전반적인 차이를 측정
     - 0에 가까울수록 두 분포가 유사
+    - 범위: [0, ln(2)] ≈ [0, 0.693]
 
-- **EMD** (Earth Mover's Distance = Wasserstein-1)
+3. **EMD** (Earth Mover's Distance = Wasserstein-1 거리)
     - 한 분포를 다른 분포로 변환하는데 필요한 최소 "작업량"
-    - 히스토그램의 형태적 유사성을 잘 포착
+    - **특징**: 히스토그램의 형태적 유사성과 shift/translation을 잘 포착
+    - 예: 실제 분포가 [0, 0, 5, 10, 8, 5, 2, 0, 0, 0]이고 예측이 [0, 5, 10, 8, 5, 2, 0, 0, 0, 0]일 때,
+      - MSE/JS는 큰 차이를 보이지만, EMD는 단순히 한 구간 shift된 것으로 인식
+    - 낮을수록 정확한 예측
+
+**지표 비교**:
+- **MSE**: 빠른 계산, 미분 가능 (학습 손실로 사용)
+- **JS Divergence**: 분포의 전반적 유사도, 정보 이론적 의미
+- **EMD**: 분포의 형태와 위치 변화에 강건, 히스토그램 예측에 가장 적합한 평가 지표
 
 ### 모델 사용
 
@@ -459,9 +521,35 @@ SOFTWARE.
 - **[garden-j](https://github.com/garden-j)**: Prompt Engineering
 - **[claude](https://github.com/claude)**: Documentation
 
-## 관련 링크
+## References
 
-- [FastAPI 문서](https://fastapi.tiangolo.com/)
-- [PyTorch 문서](https://pytorch.org/docs/)
-- [SetTransformer 논문](https://arxiv.org/abs/1810.00825)
-- [Weights & Biases](https://wandb.ai/)
+### 학술 논문 (Academic Papers)
+
+1. **Set Transformer: A Framework for Attention-based Permutation-Invariant Neural Networks**
+   - Juho Lee, Yoonho Lee, Jungtaek Kim, Adam R. Kosiorek, Seungjin Choi, Yee Whye Teh
+   - *Advances in Neural Information Processing Systems (NeurIPS) 32*, 2019
+   - arXiv: [1810.00825](https://arxiv.org/abs/1810.00825)
+   - 본 프로젝트의 ISAB-style encoder 아키텍처의 이론적 기반
+
+2. **Attention Is All You Need**
+   - Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, Illia Polosukhin
+   - *Advances in Neural Information Processing Systems (NeurIPS) 30*, 2017
+   - Multi-head attention 메커니즘의 원본 논문
+
+3. **Deep Sets**
+   - Manzil Zaheer, Satwik Kottur, Siamak Ravanbakhsh, Barnabas Poczos, Ruslan Salakhutdinov, Alexander Smola
+   - *Advances in Neural Information Processing Systems (NIPS) 30*, 2017
+   - 집합 함수의 순서 불변성에 대한 이론적 기반 제공
+
+### 기술 문서 및 도구
+
+- [FastAPI 공식 문서](https://fastapi.tiangolo.com/) - 백엔드 웹 프레임워크
+- [PyTorch 공식 문서](https://pytorch.org/docs/) - 딥러닝 프레임워크
+- [Weights & Biases](https://wandb.ai/) - 실험 추적 및 모델 관리
+- [Redis 공식 문서](https://redis.io/docs/) - 캐시 서버
+
+### 관련 개념
+
+- **Wasserstein Distance / Earth Mover's Distance**: 확률 분포 간의 거리 측정 지표
+- **Jensen-Shannon Divergence**: KL divergence의 대칭 버전으로, 분포 간 유사도 측정
+- **Permutation Invariance**: 집합 데이터 처리를 위한 핵심 속성
