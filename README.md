@@ -119,16 +119,16 @@ python init_db.py
 ```bash
 # .env 파일에 OPENAI_API_KEY 설정 필요
 # Docker Compose로 모든 서비스 시작 (FastAPI + Redis + Caddy)
-docker-compose up -d
+docker compose up -d
 
 # 로그 확인
-docker-compose logs -f
+docker compose logs -f
 
 # 서비스 중지
-docker-compose down
+docker compose down
 
 # 볼륨까지 삭제 (Redis 데이터 포함)
-docker-compose down -v
+docker compose down -v
 ```
 
 서비스 구성:
